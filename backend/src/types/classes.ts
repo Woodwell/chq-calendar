@@ -85,10 +85,14 @@ export interface ClassDetail {
   sessions: ClassSession[];
 }
 
-/** A class in the published catalog: search row plus detail-page content. */
+/**
+ * A class in the published catalog: search row plus detail-page content.
+ *
+ * No subject: the search form offers a subject filter, but it does not
+ * filter — every subject returns the same rows — and the detail page does
+ * not name one either, so the site gives us no way to learn it.
+ */
 export interface ChqClass extends ClassSearchRow, ClassDetail {
-  /** Subject the class was listed under, when the crawl filtered by subject. */
-  subject: string | null;
   timezone: 'America/New_York';
 }
 
