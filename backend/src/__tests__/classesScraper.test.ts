@@ -1,0 +1,182 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  parseAgeRange,
+  parseClassDetail,
+  parseLastPageIndex,
+  parseSearchResults,
+} from '../services/classesScraper';
+
+const fix = (n: string) => fs.readFileSync(path.join(__dirname, 'fixtures', n), 'utf8');
+
+describe('parseSearchResults', () => {
+  const rows = parseSearchResults(fix('chq-classes-search.html'));
+
+  it('extracts one row per class with an absolute registration URL', () => {
+    expect(rows).toHaveLength(6);
+
+    const beginAgain = rows.find(r => r.id === 'CHQ.EVN1676')!;
+    expect(beginAgain).toMatchObject({
+      title: 'Begin Again',
+      weeksLabel: 'Week 9',
+      daysLabel: 'M, W, F',
+      location: 'Literary Arts Center at Alumni Hall Poetry Room',
+      ageRangeText: 'Ages 18+',
+      instructor: "January O'Neil",
+      sessionCount: 3,
+      priceLabel: 'Sessions: $145.00',
+      sourceUrl: 'https://tickets.chq.org/class.html?eventAk=CHQ.EVN1676',
+    });
+    expect(beginAgain.summary).toMatch(/^Beginning a poem does not require certainty/);
+  });
+
+  it('keeps the varied week labels verbatim rather than normalizing them', () => {
+    const labels = Object.fromEntries(rows.map(r => [r.id, r.weeksLabel]));
+    expect(labels['CHQ.EVN1685']).toBe('Weeks 1, 2, 6, 7, 9');
+    expect(labels['CHQ.EVN1672']).toBe('Weeks 4 to 5');
+    expect(labels['CHQ.EVN2136']).toBe('Week 1');
+  });
+
+  it('locates the age field by prefix, so a multi-word location stays intact', () => {
+    const caregiver = rows.find(r => r.id === 'CHQ.EVN1685')!;
+    expect(caregiver.location).toBe('Heinz Beach');
+    expect(caregiver.ageRangeText).toBe('Ages 12+; 0 - 11 with Caregiver');
+    expect(caregiver.ageRange).toEqual({ min: 12, max: null });
+  });
+
+  it('ignores rows that carry no class link', () => {
+    const html = `<table><tbody>
+      <tr><td class="event-cell" data-event-title="No Link">No Link</td><td></td><td></td><td></td></tr>
+    </tbody></table>`;
+    expect(parseSearchResults(html)).toEqual([]);
+  });
+
+  it('reads each class once, from the layout that separates the fields', () => {
+    // The fragment repeats two of these classes in a mobile table whose single
+    // cell packs every field into labelled divs. Reading those rows too would
+    // both duplicate the class and blank the fields the desktop row supplies.
+    const ids = rows.map(r => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain('CHQ.EVN1672');
+    expect(rows.find(r => r.id === 'CHQ.EVN1672')!.weeksLabel).toBe('Weeks 4 to 5');
+  });
+});
+
+describe('parseLastPageIndex', () => {
+  it('reads the highest page index from the pagination control', () => {
+    expect(parseLastPageIndex(fix('chq-classes-search.html'))).toBe(46);
+  });
+
+  it('returns null when the fragment has no pagination', () => {
+    expect(parseLastPageIndex('<div><table><tbody></tbody></table></div>')).toBeNull();
+  });
+});
+
+describe('parseAgeRange', () => {
+  // Every shape observed across the full 466-class catalog on 2026-08-19.
+  it.each([
+    ['Ages 18+', { min: 18, max: null }],
+    ['Ages 14 +', { min: 14, max: null }],
+    ['Ages 7-13', { min: 7, max: 13 }],
+    ['Ages 0-3 with Caregiver', { min: 0, max: 3 }],
+    ['Ages 12+; 0 - 11 with Caregiver', { min: 12, max: null }],
+    ['Ages 50 and Up', { min: 50, max: null }],
+    ['Ages 50 and under', { min: null, max: 50 }],
+    ['Ages All ages', { min: null, max: null }],
+    ['Ages Families', { min: null, max: null }],
+  ])('parses %s', (text, expected) => {
+    expect(parseAgeRange(text)).toEqual(expected);
+  });
+
+  it('reports unbounded rather than throwing on an unrecognized label', () => {
+    expect(parseAgeRange('Ages: ask the instructor')).toEqual({ min: null, max: null });
+    expect(parseAgeRange('')).toEqual({ min: null, max: null });
+  });
+});
+
+describe('parseClassDetail', () => {
+  it('extracts each session with its own week, schedule, and spot count', () => {
+    const detail = parseClassDetail(fix('chq-class-detail.html'), 'CHQ.EVN1687', 2026);
+
+    expect(detail.title).toBe('If Chocolate Brings You Joy: Wednesday Session');
+    expect(detail.instructor).toBe('Jill Sandler');
+    expect(detail.sessions).toHaveLength(2);
+
+    expect(detail.sessions[0]).toEqual({
+      performanceId: 'CHQ.EVN1687.PRF1',
+      week: 8,
+      dateRangeLabel: 'Aug 19 - Aug 19',
+      startDate: '2026-08-19 16:30:00',
+      endDate: '2026-08-19 17:45:00',
+      daysOfWeek: ['Wednesday'],
+      timeRangeLabel: '4:30 pm - 5:45 pm',
+      location: 'Turner Community Center Conference Room',
+      spotsRemaining: 13,
+      availability: 'open',
+    });
+
+    // Same class, different week, independently tracked capacity.
+    expect(detail.sessions[1]).toMatchObject({
+      performanceId: 'CHQ.EVN1687.PRF2',
+      week: 9,
+      spotsRemaining: 28,
+      availability: 'open',
+    });
+  });
+
+  it('spans a multi-day session from the first day start to the last day end', () => {
+    const detail = parseClassDetail(fix('chq-class-detail-waitlist.html'), 'CHQ.EVN1689', 2026);
+    expect(detail.sessions[0]).toMatchObject({
+      dateRangeLabel: 'Aug 17 - Aug 21',
+      startDate: '2026-08-17 13:00:00',
+      endDate: '2026-08-21 15:00:00',
+      daysOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+    });
+  });
+
+  it('reports a full session as waitlist with no spot count', () => {
+    const detail = parseClassDetail(fix('chq-class-detail-waitlist.html'), 'CHQ.EVN1689', 2026);
+    expect(detail.sessions).toHaveLength(1);
+    expect(detail.sessions[0]).toMatchObject({
+      performanceId: 'CHQ.EVN1689.PRF2',
+      availability: 'waitlist',
+      spotsRemaining: null,
+    });
+  });
+
+  it('does not mistake the page-wide waitlist modal for a full session', () => {
+    // Both fixtures carry the hidden "Join the Waitlist" template and a nav
+    // blob containing "SOLD OUT"; only the waitlist fixture has a full session.
+    const open = fix('chq-class-detail.html');
+    expect(open).toContain('Join the Waitlist');
+    expect(open).toContain('SOLD OUT');
+
+    const detail = parseClassDetail(open, 'CHQ.EVN1687', 2026);
+    expect(detail.sessions.map(s => s.availability)).toEqual(['open', 'open']);
+  });
+
+  it('treats a class whose weeks have all passed as having no sessions', () => {
+    const detail = parseClassDetail(fix('chq-class-detail-no-sessions.html'), 'CHQ.EVN1782', 2026);
+    expect(detail.title).toBe('Theatre for Youth');
+    expect(detail.sessions).toEqual([]);
+  });
+
+  it('keeps the light HTML the description is published with', () => {
+    const detail = parseClassDetail(fix('chq-class-detail-waitlist.html'), 'CHQ.EVN1689', 2026);
+    expect(detail.description).toContain('<ul><li>Sketchbook</li></ul>');
+  });
+
+  it('marks a session unknown, and still returns it, when the state is unreadable', () => {
+    const html = `<div class="js-week-select"><p data-performance="CHQ.EVN1.PRF1">
+      <em><span>Week 3 | Jul 13 - Jul 17<br>Monday<br>9:00 am - 10:00 am<br>Hall</span></em>
+      <span class="text-center">Enrollment closed</span>
+    </p></div>`;
+    const detail = parseClassDetail(html, 'CHQ.EVN1', 2026);
+    expect(detail.sessions[0]).toMatchObject({
+      week: 3,
+      availability: 'unknown',
+      spotsRemaining: null,
+      startDate: '2026-07-13 09:00:00',
+    });
+  });
+});
