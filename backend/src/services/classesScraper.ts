@@ -60,6 +60,31 @@ export function parseAgeRange(raw: string): ClassAgeRange {
 }
 
 /**
+ * Turns a published description into plain text, keeping its line structure.
+ *
+ * Descriptions carry light markup — paragraph breaks, and materials lists as
+ * <ul>. The web app renders no raw HTML anywhere (there is not a single
+ * dangerouslySetInnerHTML in it), so publishing markup would force either a
+ * break in that rule or literal tags on screen. Stripping to one line instead
+ * would run a materials list together as "Sketchbook Pencils Brushes", so
+ * block boundaries become newlines and list items keep a bullet.
+ */
+export function descriptionToText(html: string): string {
+  if (!html) return '';
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n\u2022 ')
+    .replace(/<\/(p|div|ul|ol|li|h[1-6])>/gi, '\n');
+  return cheerio
+    .load(`<div>${withBreaks}</div>`)('div')
+    .text()
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Splits a listing row's "Quick Detail" cell. The cell packs four
  * pipe-delimited fields — weeks, days, location, ages — and the age field is
  * located by its prefix rather than by position, so a location containing a
@@ -264,7 +289,7 @@ export function parseClassDetail(
   return {
     id,
     title: collapse($('.perf-title').first().text()),
-    description: ($('.description-tab').last().html() ?? '').trim(),
+    description: descriptionToText($('.description-tab').last().html() ?? ''),
     // The instructor tab leads with the name in bold, then the bio.
     instructor: collapse($('.instructor-tab').last().find('b').first().text()),
     sessions,

@@ -79,7 +79,7 @@ export interface ClassSearchRow {
 export interface ClassDetail {
   id: string;
   title: string;
-  /** Light HTML, as published (lists, emphasis, line breaks). */
+  /** Plain text with line breaks kept; markup is stripped at ingest. */
   description: string;
   instructor: string;
   sessions: ClassSession[];

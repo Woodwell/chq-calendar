@@ -161,9 +161,14 @@ describe('parseClassDetail', () => {
     expect(detail.sessions).toEqual([]);
   });
 
-  it('keeps the light HTML the description is published with', () => {
+  it('publishes the description as text, keeping its line structure', () => {
     const detail = parseClassDetail(fix('chq-class-detail-waitlist.html'), 'CHQ.EVN1689', 2026);
-    expect(detail.description).toContain('<ul><li>Sketchbook</li></ul>');
+
+    // No markup reaches the client: the web app renders no raw HTML.
+    expect(detail.description).not.toMatch(/<[a-z]/i);
+    // But a materials list stays a list rather than running together.
+    expect(detail.description).toContain('Materials:\n\u2022 Sketchbook');
+    expect(detail.description).toMatch(/^This is an introductory level watercolor class/);
   });
 
   it('marks a session unknown, and still returns it, when the state is unreadable', () => {
