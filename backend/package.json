@@ -29,6 +29,7 @@
     "sync:fetch": "ts-node src/scripts/syncDataWithLocalFile.ts --fetch-cache",
     "sync:upload": "ts-node src/scripts/uploadToFrontendBucket.ts",
     "sync:upload-local": "ts-node src/scripts/uploadToFrontendBucket.ts --save-local",
+    "sync:classes": "ts-node src/scripts/scrapeClasses.ts",
     "init-tables": "ts-node src/scripts/initTables.ts",
     "trigger-sync": "ts-node src/scripts/triggerFullSeasonSync.ts",
     "ingest:articles:local": "ts-node src/scripts/runArticleIngestLocal.ts",
