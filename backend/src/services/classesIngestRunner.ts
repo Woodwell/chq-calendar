@@ -185,9 +185,10 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
   // Subjects cost a second full listing crawl, one pass per subject, and a
   // class's subjects do not change during a season. So they are looked up
   // only when the catalog contains a class the last run had never seen —
-  // which after the first run is usually none. A class known to belong to no
-  // subject is still "seen", so an empty list does not re-trigger this
-  // every hour for ever.
+  // which after the first run is usually none. Note this keys off having
+  // seen the class, not off it having subjects: were "no subjects" treated
+  // as "not yet known", a single subject-less class would re-trigger a full
+  // subject crawl every hour for ever.
   const unseen = rows.filter(r => !priorById.has(r.id));
   const subjectsCrawled = unseen.length > 0;
   const subjectMap = subjectsCrawled

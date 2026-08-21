@@ -91,8 +91,9 @@ export interface ChqClass extends ClassSearchRow, ClassDetail {
    * Every subject the class is listed under, e.g. ["Art", "Youth"].
    *
    * A list, not one value: most classes carry two or more, with "Youth" and
-   * "General Interest" cutting across the rest. Empty is a real answer —
-   * one class in the 2026 catalog belonged to no subject at all.
+   * "General Interest" cutting across the rest. Every class in the 2026
+   * catalog had at least one, but empty is still treated as an answer rather
+   * than a gap — see the runner for why that distinction has to hold.
    */
   subjects: string[];
   timezone: 'America/New_York';

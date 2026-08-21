@@ -221,10 +221,10 @@ export class ClassesSearchClient {
    * time — the only way to learn it, since neither the listing rows nor the
    * detail pages name a subject.
    *
-   * Classes carry more than one: of 466 in August 2026, 191 had a single
-   * subject and the rest up to seven, "Youth" and "General Interest" being
-   * the common cross-cutting ones. One class belonged to none at all, so an
-   * empty list is a real answer rather than a failed lookup.
+   * Classes carry more than one: of 466 in August 2026, 68 had a single
+   * subject and the rest up to seven, "Youth" (355) and "General Interest"
+   * (142) being the cross-cutting ones. A class with no subject at all has
+   * not been observed, but is treated as an answer rather than a gap.
    *
    * This roughly doubles the cost of a listing crawl, which is why the
    * caller is expected to do it rarely: a class's subjects do not change
