@@ -9,10 +9,19 @@
 
 import { useMemo, useState } from 'react';
 import { ClassCard } from '@/components/classes/ClassCard';
+import { ClassFilters } from '@/components/classes/ClassFilters';
 import { useClassData } from '@/hooks/useClassData';
+import { useClassFilterState } from '@/hooks/useClassFilterState';
 import { useFavorites } from '@/hooks/useFavorites';
 import { getDefaultYear } from '@/lib/constants';
-import type { ChqClass } from '@/lib/classTypes';
+import type { ChqClass, ClassSession } from '@/lib/classTypes';
+import {
+  availableDays,
+  availableWeeks,
+  filterClasses,
+  hasActiveFilters,
+  sessionMatches,
+} from '@/lib/utils/classFilterHelpers';
 
 const CATALOG_URL =
   'https://tickets.chq.org/searchclasses.html?subjectParentCat=L2_CC_SUB&weekParentCat=SEAS_WKS';
@@ -54,10 +63,34 @@ export default function ClassesPage() {
   const year = getDefaultYear();
   const { classes, generatedAt, loading, error } = useClassData(year);
   const favorites = useFavorites();
+  const filterState = useClassFilterState();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const sorted = useMemo(() => [...classes].sort(bySoonestSession), [classes]);
-  const sessionCount = useMemo(
+  const options = useMemo(
+    () => ({ ...filterState.filters, favoriteIds: favorites.favoriteIds }),
+    [filterState.filters, favorites.favoriteIds],
+  );
+  const filtering = hasActiveFilters(options);
+
+  const weeks = useMemo(() => availableWeeks(classes), [classes]);
+  const days = useMemo(() => availableDays(classes), [classes]);
+
+  // Only filter when something is actually selected. `filterClasses` keeps a
+  // class when one of its sessions matches, and a class whose sessions have
+  // all passed has none to match — so filtering unconditionally would drop
+  // every finished class from an unfiltered page.
+  const visible = useMemo(
+    () => (filtering ? filterClasses(classes, options) : [...classes]).sort(bySoonestSession),
+    [classes, options, filtering],
+  );
+  const matchingSessions = useMemo(
+    () => visible.reduce(
+      (n, c) => n + c.sessions.filter((sx) => sessionMatches(c.id, sx, options)).length,
+      0,
+    ),
+    [visible, options],
+  );
+  const totalSessions = useMemo(
     () => classes.reduce((n, c) => n + c.sessions.length, 0),
     [classes],
   );
@@ -130,9 +163,32 @@ export default function ClassesPage() {
 
         {!loading && !error && (
           <>
+            <ClassFilters
+              filters={filterState.filters}
+              weeks={weeks}
+              days={days}
+              favoriteCount={favorites.favoriteCount}
+              onSetAvailability={filterState.setAvailability}
+              onSetTimeOfDay={filterState.setTimeOfDay}
+              onToggleWeek={filterState.toggleWeek}
+              onToggleDay={filterState.toggleDay}
+              onToggleFavoritesOnly={filterState.toggleFavoritesOnly}
+            />
+
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {classes.length} classes · {sessionCount} sessions still scheduled
+                {filtering
+                  ? `${visible.length} of ${classes.length} classes · ${matchingSessions} matching sessions`
+                  : `${classes.length} classes · ${totalSessions} sessions still scheduled`}
+                {filtering && (
+                  <button
+                    type="button"
+                    onClick={filterState.clearAll}
+                    className="ml-2 text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
               </p>
               {generatedAt && (
                 <p className="text-xs text-gray-500 dark:text-gray-500">
@@ -141,18 +197,34 @@ export default function ClassesPage() {
               )}
             </div>
 
-            <div className="space-y-3">
-              {sorted.map((chqClass) => (
-                <ClassCard
-                  key={chqClass.id}
-                  chqClass={chqClass}
-                  isExpanded={expanded.has(chqClass.id)}
-                  onToggleDescription={toggleDescription}
-                  isFavorite={favorites.isFavorite}
-                  onToggleFavorite={favorites.toggleFavorite}
-                />
-              ))}
-            </div>
+            {visible.length === 0 ? (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 text-center">
+                <p className="text-gray-900 dark:text-gray-100 font-medium">No classes match these filters.</p>
+                <button
+                  type="button"
+                  onClick={filterState.clearAll}
+                  className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {visible.map((chqClass) => (
+                  <ClassCard
+                    key={chqClass.id}
+                    chqClass={chqClass}
+                    isExpanded={expanded.has(chqClass.id)}
+                    onToggleDescription={toggleDescription}
+                    isFavorite={favorites.isFavorite}
+                    onToggleFavorite={favorites.toggleFavorite}
+                    sessionMatches={filtering
+                      ? (sx: ClassSession) => sessionMatches(chqClass.id, sx, options)
+                      : undefined}
+                  />
+                ))}
+              </div>
+            )}
           </>
         )}
       </main>

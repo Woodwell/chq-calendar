@@ -29,14 +29,18 @@ interface SessionRowProps {
   registerUrl: string;
   isFavorite: boolean;
   onToggleFavorite: (key: string) => void;
+  /** False when filters are active and this session is not one of the matches. */
+  matches: boolean;
 }
 
-function SessionRow({ session, classId, registerUrl, isFavorite, onToggleFavorite }: SessionRowProps) {
+function SessionRow({ session, classId, registerUrl, isFavorite, onToggleFavorite, matches }: SessionRowProps) {
   const badge = availabilityLabel(session);
   const key = classSessionKey(classId, session.performanceId);
 
   return (
-    <li className="flex items-start gap-2 py-2 border-t border-gray-100 dark:border-gray-700 first:border-t-0">
+    <li className={`flex items-start gap-2 py-2 border-t border-gray-100 dark:border-gray-700 first:border-t-0 ${
+      matches ? '' : 'opacity-40'
+    }`}>
       <button
         type="button"
         onClick={() => onToggleFavorite(key)}
@@ -85,9 +89,16 @@ interface ClassCardProps {
   onToggleDescription: (classId: string) => void;
   isFavorite: (key: string) => boolean;
   onToggleFavorite: (key: string) => void;
+  /**
+   * Whether a session survives the active filters. Non-matching sessions are
+   * dimmed rather than removed: someone filtering to Week 8 still wants to
+   * see that the class also runs in Week 9, and hiding it would make a
+   * two-session class look like a one-session class.
+   */
+  sessionMatches?: (session: ClassSession) => boolean;
 }
 
-export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite }: ClassCardProps) {
+export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite, sessionMatches }: ClassCardProps) {
   const { sessions } = chqClass;
 
   return (
@@ -141,6 +152,7 @@ export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorit
                 registerUrl={chqClass.sourceUrl}
                 isFavorite={isFavorite(classSessionKey(chqClass.id, session.performanceId))}
                 onToggleFavorite={onToggleFavorite}
+                matches={sessionMatches ? sessionMatches(session) : true}
               />
             ))}
           </ul>

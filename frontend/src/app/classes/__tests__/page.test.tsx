@@ -99,7 +99,8 @@ describe('ClassesPage', () => {
     })]));
     render(<ClassesPage />);
 
-    expect(await screen.findByText('Waitlist')).toBeInTheDocument();
+    // Scoped to the badge: "Waitlist" is also the name of a filter button.
+    expect(await screen.findByText('Waitlist', { selector: 'span' })).toBeInTheDocument();
     expect(screen.queryByText(/spots left/)).not.toBeInTheDocument();
   });
 
@@ -130,5 +131,98 @@ describe('ClassesPage', () => {
 
     expect(await screen.findByText('Classes are not available right now.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Browse them on tickets.chq.org/ })).toBeInTheDocument();
+  });
+});
+
+describe('ClassesPage filters', () => {
+  const twoWeekClass = makeClass({
+    id: 'CHQ.EVN1',
+    title: 'Watercolors for Beginners',
+    sessions: [
+      { ...makeClass().sessions[0], performanceId: 'p8', week: 8, startDate: '2026-08-17 09:00:00' },
+      {
+        ...makeClass().sessions[0],
+        performanceId: 'p9', week: 9, startDate: '2026-08-24 19:00:00',
+        availability: 'waitlist', spotsRemaining: null,
+      },
+    ],
+  });
+
+  it('offers only the weeks that still have sessions', async () => {
+    useClassData.mockReturnValue(loaded([twoWeekClass]));
+    render(<ClassesPage />);
+
+    expect(await screen.findByRole('button', { name: 'Week 8' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Week 9' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Week 1' })).not.toBeInTheDocument();
+  });
+
+  it('narrows to the classes with an open session', async () => {
+    const waitlistOnly = makeClass({
+      id: 'CHQ.EVN2', title: 'Full Class',
+      sessions: [{ ...makeClass().sessions[0], availability: 'waitlist', spotsRemaining: null }],
+    });
+    useClassData.mockReturnValue(loaded([twoWeekClass, waitlistOnly]));
+    render(<ClassesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+
+    await waitFor(() => expect(screen.queryByText('Full Class')).not.toBeInTheDocument());
+    expect(screen.getByText('Watercolors for Beginners')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 classes/)).toBeInTheDocument();
+  });
+
+  it('keeps a filtered-out session visible but dimmed', async () => {
+    useClassData.mockReturnValue(loaded([twoWeekClass]));
+    const { container } = render(<ClassesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Week 8' }));
+
+    // Someone filtering to Week 8 still wants to see the class also runs in
+    // Week 9 — hiding it would make a two-session class look like one.
+    await waitFor(() => expect(container.querySelectorAll('li.opacity-40')).toHaveLength(1));
+    expect(container.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('says so when the filters match nothing, and offers a way back', async () => {
+    useClassData.mockReturnValue(loaded([twoWeekClass]));
+    render(<ClassesPage />);
+
+    // Week 8 here is a morning session; Week 9 is an evening one. Asking for
+    // a Week 8 evening should find nothing rather than matching either half.
+    fireEvent.click(await screen.findByRole('button', { name: 'Week 8' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Evening' }));
+
+    expect(await screen.findByText('No classes match these filters.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[0]);
+    await waitFor(() => expect(screen.getByText('Watercolors for Beginners')).toBeInTheDocument());
+  });
+
+  it('remembers the filters for next time', async () => {
+    useClassData.mockReturnValue(loaded([twoWeekClass]));
+    const { unmount } = render(<ClassesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Waitlist' }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('chq-classes-user-state') ?? '{}');
+      expect(saved.availability).toBe('waitlist');
+    });
+    unmount();
+
+    render(<ClassesPage />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Waitlist' })).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  it("keeps its filters out of the calendar's saved state", async () => {
+    useClassData.mockReturnValue(loaded([twoWeekClass]));
+    render(<ClassesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+
+    await waitFor(() => expect(localStorage.getItem('chq-classes-user-state')).toBeTruthy());
+    // The calendar filters on entirely different things; one page's saved
+    // state must never decide how the other reads.
+    expect(localStorage.getItem('chq-calendar-user-state')).toBeNull();
   });
 });
