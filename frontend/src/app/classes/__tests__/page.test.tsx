@@ -5,6 +5,17 @@ import type { ChqClass } from '@/lib/classTypes';
 const useClassData = vi.fn();
 vi.mock('@/hooks/useClassData', () => ({ useClassData: (year: number) => useClassData(year) }));
 
+// The banner is compiled out of a normal build, so it is switched here.
+const demoState = { isDemoBuild: false };
+vi.mock('@/lib/demoMode', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/demoMode')>('@/lib/demoMode');
+  return {
+    ...actual,
+    get isDemoBuild() { return demoState.isDemoBuild; },
+    buildInfo: { version: 'abc1234', builtAt: '2026-08-21T14:32:00Z' },
+  };
+});
+
 const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   id: 'CHQ.EVN1',
   title: 'Watercolors for Beginners',
@@ -43,6 +54,7 @@ const loaded = (classes: ChqClass[]) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  demoState.isDemoBuild = false;
 });
 
 /**
@@ -253,5 +265,30 @@ describe('ClassesPage filters', () => {
     // The calendar filters on entirely different things; one page's saved
     // state must never decide how the other reads.
     expect(localStorage.getItem('chq-calendar-user-state')).toBeNull();
+  });
+});
+
+describe('demo build', () => {
+  it('shows nothing extra in a normal build', async () => {
+    useClassData.mockReturnValue(loaded([makeClass()]));
+    render(<ClassesPage />);
+
+    expect(await screen.findByText('Watercolors for Beginners')).toBeInTheDocument();
+    expect(screen.queryByTestId('demo-banner')).not.toBeInTheDocument();
+  });
+
+  it('says what it is, how stale it is, and which build made it', async () => {
+    demoState.isDemoBuild = true;
+    useClassData.mockReturnValue(loaded([makeClass()]));
+    render(<ClassesPage />);
+
+    const banner = await screen.findByTestId('demo-banner');
+    // All three, because a preview missing any of them invites someone to
+    // act on numbers that are neither live nor bookable.
+    expect(banner).toHaveTextContent(/not the live site/i);
+    expect(banner).toHaveTextContent(/snapshot/i);
+    expect(banner).toHaveTextContent('build abc1234');
+    expect(banner).toHaveTextContent(/21 Aug 2026/);
+    expect(banner.querySelector('a')).toHaveAttribute('href', expect.stringContaining('tickets.chq.org'));
   });
 });

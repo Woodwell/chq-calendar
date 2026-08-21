@@ -125,6 +125,9 @@ export default defineConfig({
   plugins: [devServerMiddleware(), preact(), emitVersionJson(APP_VERSION), emitSitemapXml()],
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(APP_VERSION),
+    // Demo builds show when they were made; a preview nobody can date is
+    // worse than no preview.
+    'import.meta.env.VITE_BUILD_TIME': JSON.stringify(new Date().toISOString()),
   },
   resolve: {
     alias: {

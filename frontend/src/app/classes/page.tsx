@@ -14,6 +14,7 @@ import { useClassData } from '@/hooks/useClassData';
 import { useClassFilterState } from '@/hooks/useClassFilterState';
 import { useFavorites } from '@/hooks/useFavorites';
 import { getDefaultYear } from '@/lib/constants';
+import { buildInfo, formatBuildTime, isDemoBuild } from '@/lib/demoMode';
 import type { ChqClass, ClassSession } from '@/lib/classTypes';
 import {
   activeFilterCount,
@@ -143,6 +144,34 @@ export default function ClassesPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {isDemoBuild && (
+          // Says three things, because a preview that hides any of them
+          // invites someone to act on it: this is not the live site, the
+          // numbers are a snapshot rather than a booking system, and exactly
+          // which build produced what you are looking at.
+          <aside
+            data-testid="demo-banner"
+            className="mb-4 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 p-3 text-sm"
+          >
+            <p className="font-medium text-amber-900 dark:text-amber-200">
+              Demo build — not the live site, and not a booking system.
+            </p>
+            <p className="text-amber-800 dark:text-amber-300 mt-1">
+              Spot counts are a snapshot
+              {generatedAt && <> taken {describeAge(generatedAt)}</>}, so they
+              drift as people enroll.{' '}
+              <a className="underline" href={CATALOG_URL} target="_blank" rel="noopener noreferrer">
+                tickets.chq.org
+              </a>{' '}
+              is authoritative, and is where you register.
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1 font-mono">
+              build {buildInfo.version}
+              {formatBuildTime(buildInfo.builtAt) && <> · {formatBuildTime(buildInfo.builtAt)}</>}
+            </p>
+          </aside>
+        )}
+
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           Special Studies classes for the {year} season. Spot counts come from{' '}
           <a

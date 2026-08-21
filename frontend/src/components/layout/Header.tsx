@@ -4,6 +4,7 @@ import { HeaderMenu, newTabLabel, type HeaderMenuItem } from '@/components/layou
 import { quickLinks, inAppLinks, externalLinks, type QuickLink } from '@/lib/quickLinks';
 import { APP_STORE_URL } from '@/lib/constants';
 import { isAppPromoAvailable, readDeviceInfo } from '@/lib/iosPromo';
+import { isDemoBuild } from '@/lib/demoMode';
 
 interface HeaderProps {
   selectedYear: number;
@@ -28,6 +29,21 @@ const APP_PROMO_ITEM: HeaderMenuItem = {
   setApart: true,
 };
 
+/**
+ * Only in a demo build. The real link belongs in shared/links.json, which
+ * would put it on the live site and in the iOS About screen too — premature
+ * while /classes is still being reviewed.
+ */
+const DEMO_CLASSES_ITEM: HeaderMenuItem = {
+  id: 'classes-demo',
+  title: 'Classes (demo)',
+  href: '/classes',
+  newTab: false,
+  // Deliberately not setApart: the promo above it already draws a divider,
+  // and a second one both looks fussy and breaks a Header test that expects
+  // exactly one. Temporary scaffolding should not reshape shipped chrome.
+};
+
 export function Header({ selectedYear, availableYears, defaultYear, onYearChange }: HeaderProps) {
   // Eligible iOS devices keep a persistent link to the app regardless of
   // whether the promo banner was dismissed. Detected in an effect so the first
@@ -39,6 +55,7 @@ export function Header({ selectedYear, availableYears, defaultYear, onYearChange
   }, []);
 
   const promo = appAvailable ? [APP_PROMO_ITEM] : [];
+  const demo = isDemoBuild ? [DEMO_CLASSES_ITEM] : [];
 
   return (
     <header className="bg-white dark:bg-gray-800 shadow-lg">
@@ -89,7 +106,7 @@ export function Header({ selectedYear, availableYears, defaultYear, onYearChange
             <HeaderMenu
               label="Chautauqua"
               ariaLabel="Chautauqua Institution sites"
-              items={[...promo, ...externalLinks.map(toMenuItem)]}
+              items={[...promo, ...demo, ...externalLinks.map(toMenuItem)]}
             />
           </div>
 
@@ -100,7 +117,7 @@ export function Header({ selectedYear, availableYears, defaultYear, onYearChange
             <HeaderMenu
               label="More"
               ariaLabel="Site links"
-              items={[...promo, ...quickLinks.map(toMenuItem)]}
+              items={[...promo, ...demo, ...quickLinks.map(toMenuItem)]}
               triggerClassName="px-2 py-1 text-xs"
             />
           </div>

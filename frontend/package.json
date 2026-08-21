@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run validate && npm run test:ci && vite build",
+    "build:demo": "npm run validate && npm run test:ci && VITE_DEMO=true vite build",
     "preview": "vite preview",
     "lint": "eslint src/",
     "type-check": "tsc --noEmit",
