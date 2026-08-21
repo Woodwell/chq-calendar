@@ -13,19 +13,28 @@ import type { AvailabilityFilter, TimeOfDay } from '@/lib/utils/classFilterHelpe
 const STORAGE_KEY = 'chq-classes-user-state';
 
 export interface ClassFilterState {
+  searchTerm: string;
   availability: AvailabilityFilter;
   selectedWeeks: number[];
   selectedDays: string[];
   timeOfDay: TimeOfDay;
   showFavoritesOnly: boolean;
+  /**
+   * Whether to list classes whose sessions have all passed. Off by default:
+   * late in the season they are most of the catalog — 361 of 466 in late
+   * August — and none of them can be signed up for.
+   */
+  includeFinished: boolean;
 }
 
 const EMPTY: ClassFilterState = {
+  searchTerm: '',
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
   timeOfDay: 'all',
   showFavoritesOnly: false,
+  includeFinished: false,
 };
 
 interface StoredState extends ClassFilterState {
@@ -40,11 +49,13 @@ function load(): ClassFilterState {
     const parsed = JSON.parse(raw) as Partial<StoredState>;
     if (!parsed.lastSaved || Date.now() - parsed.lastSaved > USER_STATE_EXPIRY_MS) return EMPTY;
     return {
+      searchTerm: typeof parsed.searchTerm === 'string' ? parsed.searchTerm : '',
       availability: parsed.availability ?? EMPTY.availability,
       selectedWeeks: Array.isArray(parsed.selectedWeeks) ? parsed.selectedWeeks : [],
       selectedDays: Array.isArray(parsed.selectedDays) ? parsed.selectedDays : [],
       timeOfDay: parsed.timeOfDay ?? EMPTY.timeOfDay,
       showFavoritesOnly: parsed.showFavoritesOnly ?? false,
+      includeFinished: parsed.includeFinished ?? false,
     };
   } catch {
     return EMPTY;
@@ -69,6 +80,14 @@ export function useClassFilterState() {
     }
   }, [filters]);
 
+  const setSearchTerm = useCallback((searchTerm: string) => {
+    setFilters((f) => ({ ...f, searchTerm }));
+  }, []);
+
+  const toggleIncludeFinished = useCallback(() => {
+    setFilters((f) => ({ ...f, includeFinished: !f.includeFinished }));
+  }, []);
+
   const setAvailability = useCallback((availability: AvailabilityFilter) => {
     setFilters((f) => ({ ...f, availability }));
   }, []);
@@ -89,10 +108,17 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, showFavoritesOnly: !f.showFavoritesOnly }));
   }, []);
 
-  const clearAll = useCallback(() => setFilters(EMPTY), []);
+  // Clearing filters is about the search and the pickers; whether finished
+  // classes are listed is a separate choice and stays where it was put.
+  const clearAll = useCallback(
+    () => setFilters((f) => ({ ...EMPTY, includeFinished: f.includeFinished })),
+    [],
+  );
 
   return {
     filters,
+    setSearchTerm,
+    toggleIncludeFinished,
     setAvailability,
     setTimeOfDay,
     toggleWeek,

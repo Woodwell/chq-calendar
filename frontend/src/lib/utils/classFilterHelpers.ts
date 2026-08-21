@@ -5,6 +5,8 @@ export type AvailabilityFilter = 'all' | 'open' | 'waitlist';
 export type TimeOfDay = 'all' | 'morning' | 'afternoon' | 'evening';
 
 export interface ClassFilterOptions {
+  /** Matched against the class title and instructor, not its sessions. */
+  searchTerm: string;
   availability: AvailabilityFilter;
   /** Empty means "any week". */
   selectedWeeks: number[];
@@ -16,6 +18,7 @@ export interface ClassFilterOptions {
 }
 
 export const EMPTY_CLASS_FILTERS: ClassFilterOptions = {
+  searchTerm: '',
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
@@ -71,6 +74,27 @@ export function sessionMatches(
   return true;
 }
 
+/** Whether any filter that applies to a *session* is active. */
+export function hasSessionFilters(options: ClassFilterOptions): boolean {
+  return (
+    options.availability !== 'all' ||
+    options.selectedWeeks.length > 0 ||
+    options.selectedDays.length > 0 ||
+    options.timeOfDay !== 'all' ||
+    options.showFavoritesOnly
+  );
+}
+
+/** Title or instructor, case-insensitive. Both are what people search by. */
+export function matchesSearch(chqClass: ChqClass, term: string): boolean {
+  if (!term) return true;
+  const needle = term.toLowerCase();
+  return (
+    chqClass.title.toLowerCase().includes(needle) ||
+    chqClass.instructor.toLowerCase().includes(needle)
+  );
+}
+
 /**
  * Classes with at least one session satisfying every active filter.
  *
@@ -84,17 +108,33 @@ export function sessionMatches(
  * which has no Monday evening to offer.
  */
 export function filterClasses(classes: ChqClass[], options: ClassFilterOptions): ChqClass[] {
-  return classes.filter((c) => c.sessions.some((s) => sessionMatches(c.id, s, options)));
+  const term = options.searchTerm.trim();
+  // Only require a matching session when a session-level filter is actually
+  // set. A class whose sessions have all passed has none to match, so an
+  // unconditional `.some()` would drop every finished class the moment
+  // someone typed a search term.
+  const bySession = hasSessionFilters(options);
+  return classes.filter((c) => {
+    if (!matchesSearch(c, term)) return false;
+    if (bySession && !c.sessions.some((s) => sessionMatches(c.id, s, options))) return false;
+    return true;
+  });
 }
 
-/** True when nothing is being filtered, so the page can skip the work. */
+/** True when anything at all is being filtered. */
 export function hasActiveFilters(options: ClassFilterOptions): boolean {
+  return options.searchTerm.trim().length > 0 || hasSessionFilters(options);
+}
+
+/** How many filters are set, for the collapsed panel's summary. */
+export function activeFilterCount(options: ClassFilterOptions): number {
   return (
-    options.availability !== 'all' ||
-    options.selectedWeeks.length > 0 ||
-    options.selectedDays.length > 0 ||
-    options.timeOfDay !== 'all' ||
-    options.showFavoritesOnly
+    (options.searchTerm.trim() ? 1 : 0) +
+    (options.availability === 'all' ? 0 : 1) +
+    options.selectedWeeks.length +
+    options.selectedDays.length +
+    (options.timeOfDay === 'all' ? 0 : 1) +
+    (options.showFavoritesOnly ? 1 : 0)
   );
 }
 

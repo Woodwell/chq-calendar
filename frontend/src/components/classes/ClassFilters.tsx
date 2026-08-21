@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ClassFilterState } from '@/hooks/useClassFilterState';
 import type { AvailabilityFilter, TimeOfDay } from '@/lib/utils/classFilterHelpers';
@@ -72,6 +73,10 @@ interface ClassFiltersProps {
   weeks: number[];
   days: string[];
   favoriteCount: number;
+  finishedCount: number;
+  activeCount: number;
+  onSetSearchTerm: (value: string) => void;
+  onToggleIncludeFinished: () => void;
   onSetAvailability: (value: AvailabilityFilter) => void;
   onSetTimeOfDay: (value: TimeOfDay) => void;
   onToggleWeek: (week: number) => void;
@@ -80,14 +85,46 @@ interface ClassFiltersProps {
 }
 
 export function ClassFilters({
-  filters, weeks, days, favoriteCount,
+  filters, weeks, days, favoriteCount, finishedCount, activeCount,
+  onSetSearchTerm, onToggleIncludeFinished,
   onSetAvailability, onSetTimeOfDay, onToggleWeek, onToggleDay, onToggleFavoritesOnly,
 }: ClassFiltersProps) {
+  // Open on a wide screen, closed on a phone. Expanded, the pickers run to
+  // roughly 590px, which on a 812px-tall screen means scrolling past the
+  // whole panel before reaching a single class. Read once at mount rather
+  // than tracked: this decides a starting state, and re-collapsing a panel
+  // under someone because they rotated the phone would be worse.
+  const [open, setOpen] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
+    return window.matchMedia('(min-width: 640px)').matches;
+  });
+
   return (
     <section
       aria-label="Filter classes"
       className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-4 space-y-3"
     >
+      <div className="flex items-center gap-2">
+        <input
+          type="search"
+          value={filters.searchTerm}
+          onInput={(e) => onSetSearchTerm((e.target as HTMLInputElement).value)}
+          placeholder="Search class or instructor…"
+          aria-label="Search class or instructor"
+          className="flex-1 min-w-0 px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm placeholder-gray-400 dark:placeholder-gray-500"
+        />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="shrink-0 px-3 py-2 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
+        >
+          Filters{activeCount > 0 ? ` (${activeCount})` : ''}
+        </button>
+      </div>
+
+      {!open ? null : (
+      <>
       <Group label="Spots">
         {AVAILABILITY.map(({ value, label, title }) => (
           <Toggle
@@ -149,6 +186,24 @@ export function ClassFilters({
           />
         ))}
       </Group>
+
+      {/* Not one of the pickers: this decides what the catalog even contains,
+          so it sits apart from them and survives "clear filters". */}
+      {finishedCount > 0 && (
+        <div className="pt-1 border-t border-gray-100 dark:border-gray-700">
+          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filters.includeFinished}
+              onChange={onToggleIncludeFinished}
+              className="rounded border-gray-300 dark:border-gray-600"
+            />
+            Include {finishedCount} finished {finishedCount === 1 ? 'class' : 'classes'}
+          </label>
+        </div>
+      )}
+      </>
+      )}
     </section>
   );
 }

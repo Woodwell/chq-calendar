@@ -16,10 +16,12 @@ import { useFavorites } from '@/hooks/useFavorites';
 import { getDefaultYear } from '@/lib/constants';
 import type { ChqClass, ClassSession } from '@/lib/classTypes';
 import {
+  activeFilterCount,
   availableDays,
   availableWeeks,
   filterClasses,
   hasActiveFilters,
+  hasSessionFilters,
   sessionMatches,
 } from '@/lib/utils/classFilterHelpers';
 
@@ -71,28 +73,35 @@ export default function ClassesPage() {
     [filterState.filters, favorites.favoriteIds],
   );
   const filtering = hasActiveFilters(options);
+  const dimming = hasSessionFilters(options);
 
   const weeks = useMemo(() => availableWeeks(classes), [classes]);
   const days = useMemo(() => availableDays(classes), [classes]);
 
-  // Only filter when something is actually selected. `filterClasses` keeps a
-  // class when one of its sessions matches, and a class whose sessions have
-  // all passed has none to match — so filtering unconditionally would drop
-  // every finished class from an unfiltered page.
+  // A class with no sessions left cannot be signed up for, and by late
+  // August that is most of the catalog. Hidden unless asked for, and the
+  // count is offered rather than the classes, so the page opens on what is
+  // actually available.
+  const finished = useMemo(() => classes.filter((c) => c.sessions.length === 0), [classes]);
+  const inScope = useMemo(
+    () => (filterState.filters.includeFinished
+      ? classes
+      : classes.filter((c) => c.sessions.length > 0)),
+    [classes, filterState.filters.includeFinished],
+  );
+
   const visible = useMemo(
-    () => (filtering ? filterClasses(classes, options) : [...classes]).sort(bySoonestSession),
-    [classes, options, filtering],
+    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
+    [inScope, options, filtering],
   );
   const matchingSessions = useMemo(
     () => visible.reduce(
-      (n, c) => n + c.sessions.filter((sx) => sessionMatches(c.id, sx, options)).length,
+      (n, c) => n + (dimming
+        ? c.sessions.filter((sx) => sessionMatches(c.id, sx, options)).length
+        : c.sessions.length),
       0,
     ),
-    [visible, options],
-  );
-  const totalSessions = useMemo(
-    () => classes.reduce((n, c) => n + c.sessions.length, 0),
-    [classes],
+    [visible, options, dimming],
   );
 
   const toggleDescription = (classId: string) => {
@@ -168,6 +177,10 @@ export default function ClassesPage() {
               weeks={weeks}
               days={days}
               favoriteCount={favorites.favoriteCount}
+              finishedCount={finished.length}
+              activeCount={activeFilterCount(options)}
+              onSetSearchTerm={filterState.setSearchTerm}
+              onToggleIncludeFinished={filterState.toggleIncludeFinished}
               onSetAvailability={filterState.setAvailability}
               onSetTimeOfDay={filterState.setTimeOfDay}
               onToggleWeek={filterState.toggleWeek}
@@ -178,8 +191,8 @@ export default function ClassesPage() {
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 {filtering
-                  ? `${visible.length} of ${classes.length} classes · ${matchingSessions} matching sessions`
-                  : `${classes.length} classes · ${totalSessions} sessions still scheduled`}
+                  ? `${visible.length} of ${inScope.length} classes · ${matchingSessions} matching sessions`
+                  : `${visible.length} classes · ${matchingSessions} sessions still scheduled`}
                 {filtering && (
                   <button
                     type="button"
@@ -218,7 +231,7 @@ export default function ClassesPage() {
                     onToggleDescription={toggleDescription}
                     isFavorite={favorites.isFavorite}
                     onToggleFavorite={favorites.toggleFavorite}
-                    sessionMatches={filtering
+                    sessionMatches={dimming
                       ? (sx: ClassSession) => sessionMatches(chqClass.id, sx, options)
                       : undefined}
                   />

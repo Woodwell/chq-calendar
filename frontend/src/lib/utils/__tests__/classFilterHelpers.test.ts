@@ -1,5 +1,8 @@
 import {
   EMPTY_CLASS_FILTERS,
+  activeFilterCount,
+  hasSessionFilters,
+  matchesSearch,
   availableDays,
   availableWeeks,
   filterClasses,
@@ -130,5 +133,59 @@ describe('the pickers offer only what exists', () => {
     ];
     expect(availableWeeks(classes)).toEqual([8, 9]);
     expect(availableDays(classes)).toEqual(['Monday', 'Wednesday', 'Friday']);
+  });
+});
+
+describe('search', () => {
+  const c = chqClass('a', [session()]);
+  c.title = 'Watercolors for Beginners';
+  c.instructor = 'Kim Kloecker';
+
+  it('matches the title or the instructor, either case', () => {
+    expect(matchesSearch(c, 'watercolor')).toBe(true);
+    expect(matchesSearch(c, 'KLOECKER')).toBe(true);
+    expect(matchesSearch(c, 'pottery')).toBe(false);
+    expect(matchesSearch(c, '')).toBe(true);
+  });
+
+  it('finds a finished class, which has no session to match', () => {
+    // Search is about the class, not its sessions. Requiring a matching
+    // session would make finished classes unsearchable even when the reader
+    // has asked to see them.
+    const finished = chqClass('done', []);
+    finished.title = 'Watercolors for Beginners';
+    const found = filterClasses([finished], { ...EMPTY_CLASS_FILTERS, searchTerm: 'watercolor' });
+    expect(found).toHaveLength(1);
+  });
+
+  it('combines with the session filters', () => {
+    const open = chqClass('open', [session({ availability: 'open' })]);
+    open.title = 'Watercolors for Beginners';
+    const full = chqClass('full', [session({ availability: 'waitlist', spotsRemaining: null })]);
+    full.title = 'Watercolors Advanced';
+
+    const options = { ...EMPTY_CLASS_FILTERS, searchTerm: 'watercolors', availability: 'open' as const };
+    expect(filterClasses([open, full], options).map(x => x.id)).toEqual(['open']);
+  });
+});
+
+describe('activeFilterCount', () => {
+  it('counts every selection, so the collapsed panel can say how many', () => {
+    expect(activeFilterCount(EMPTY_CLASS_FILTERS)).toBe(0);
+    expect(activeFilterCount({
+      ...EMPTY_CLASS_FILTERS,
+      searchTerm: 'yoga',
+      availability: 'open',
+      selectedWeeks: [8, 9],
+      timeOfDay: 'morning',
+    })).toBe(5);
+  });
+
+  it('separates search from the session filters', () => {
+    // Search alone must not make the page think a session filter is on, or
+    // finished classes would vanish the moment someone typed.
+    const searching = { ...EMPTY_CLASS_FILTERS, searchTerm: 'yoga' };
+    expect(hasSessionFilters(searching)).toBe(false);
+    expect(hasActiveFilters(searching)).toBe(true);
   });
 });

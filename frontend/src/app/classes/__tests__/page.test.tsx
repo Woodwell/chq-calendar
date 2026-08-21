@@ -44,6 +44,20 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+/**
+ * The pickers are behind a toggle, and the suite's matchMedia stub reports
+ * `matches: false`, so every test sees the narrow-screen default: collapsed.
+ */
+async function openFilters() {
+  fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }));
+}
+
+/** Finished classes are hidden by default; this is the checkbox for them. */
+async function includeFinished() {
+  await openFilters();
+  fireEvent.click(screen.getByRole('checkbox', { name: /Include \d+ finished/ }));
+}
+
 describe('bySoonestSession', () => {
   it('puts the soonest session first and the finished classes last', () => {
     const soon = makeClass({ id: 'a', title: 'A' });
@@ -104,11 +118,18 @@ describe('ClassesPage', () => {
     expect(screen.queryByText(/spots left/)).not.toBeInTheDocument();
   });
 
-  it('says so plainly when a class has nothing left this season', async () => {
-    useClassData.mockReturnValue(loaded([makeClass({ sessions: [] })]));
+  it('hides classes whose sessions have all passed, and offers them by count', async () => {
+    useClassData.mockReturnValue(loaded([makeClass(), makeClass({ id: 'CHQ.EVN9', title: 'Finished Class', sessions: [] })]));
     render(<ClassesPage />);
 
-    expect(await screen.findByText('No sessions remaining this season.')).toBeInTheDocument();
+    // Late in the season these are most of the catalog and none can be
+    // signed up for, so the page opens on what is actually available.
+    expect(await screen.findByText('Watercolors for Beginners')).toBeInTheDocument();
+    expect(screen.queryByText('Finished Class')).not.toBeInTheDocument();
+
+    await includeFinished();
+    expect(await screen.findByText('Finished Class')).toBeInTheDocument();
+    expect(screen.getByText('No sessions remaining this season.')).toBeInTheDocument();
   });
 
   it('stars a single session, under a key that cannot collide with an event', async () => {
@@ -151,6 +172,7 @@ describe('ClassesPage filters', () => {
   it('offers only the weeks that still have sessions', async () => {
     useClassData.mockReturnValue(loaded([twoWeekClass]));
     render(<ClassesPage />);
+    await openFilters();
 
     expect(await screen.findByRole('button', { name: 'Week 8' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Week 9' })).toBeInTheDocument();
@@ -164,6 +186,7 @@ describe('ClassesPage filters', () => {
     });
     useClassData.mockReturnValue(loaded([twoWeekClass, waitlistOnly]));
     render(<ClassesPage />);
+    await openFilters();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
 
@@ -175,6 +198,7 @@ describe('ClassesPage filters', () => {
   it('keeps a filtered-out session visible but dimmed', async () => {
     useClassData.mockReturnValue(loaded([twoWeekClass]));
     const { container } = render(<ClassesPage />);
+    await openFilters();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Week 8' }));
 
@@ -187,6 +211,7 @@ describe('ClassesPage filters', () => {
   it('says so when the filters match nothing, and offers a way back', async () => {
     useClassData.mockReturnValue(loaded([twoWeekClass]));
     render(<ClassesPage />);
+    await openFilters();
 
     // Week 8 here is a morning session; Week 9 is an evening one. Asking for
     // a Week 8 evening should find nothing rather than matching either half.
@@ -202,6 +227,7 @@ describe('ClassesPage filters', () => {
   it('remembers the filters for next time', async () => {
     useClassData.mockReturnValue(loaded([twoWeekClass]));
     const { unmount } = render(<ClassesPage />);
+    await openFilters();
     fireEvent.click(await screen.findByRole('button', { name: 'Waitlist' }));
 
     await waitFor(() => {
@@ -211,6 +237,7 @@ describe('ClassesPage filters', () => {
     unmount();
 
     render(<ClassesPage />);
+    await openFilters();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Waitlist' })).toHaveAttribute('aria-pressed', 'true'));
   });
@@ -218,6 +245,7 @@ describe('ClassesPage filters', () => {
   it("keeps its filters out of the calendar's saved state", async () => {
     useClassData.mockReturnValue(loaded([twoWeekClass]));
     render(<ClassesPage />);
+    await openFilters();
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(localStorage.getItem('chq-classes-user-state')).toBeTruthy());
