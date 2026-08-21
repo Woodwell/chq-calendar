@@ -70,6 +70,7 @@ const TIMES: { value: TimeOfDay; label: string }[] = [
 
 interface ClassFiltersProps {
   filters: ClassFilterState;
+  subjects: string[];
   weeks: number[];
   days: string[];
   favoriteCount: number;
@@ -79,15 +80,16 @@ interface ClassFiltersProps {
   onToggleIncludeFinished: () => void;
   onSetAvailability: (value: AvailabilityFilter) => void;
   onSetTimeOfDay: (value: TimeOfDay) => void;
+  onToggleSubject: (subject: string) => void;
   onToggleWeek: (week: number) => void;
   onToggleDay: (day: string) => void;
   onToggleFavoritesOnly: () => void;
 }
 
 export function ClassFilters({
-  filters, weeks, days, favoriteCount, finishedCount, activeCount,
+  filters, subjects, weeks, days, favoriteCount, finishedCount, activeCount,
   onSetSearchTerm, onToggleIncludeFinished,
-  onSetAvailability, onSetTimeOfDay, onToggleWeek, onToggleDay, onToggleFavoritesOnly,
+  onSetAvailability, onSetTimeOfDay, onToggleSubject, onToggleWeek, onToggleDay, onToggleFavoritesOnly,
 }: ClassFiltersProps) {
   // Open on a wide screen, closed on a phone. Expanded, the pickers run to
   // roughly 590px, which on a 812px-tall screen means scrolling past the
@@ -142,6 +144,19 @@ export function ClassFilters({
           onClick={onToggleFavoritesOnly}
         />
       </Group>
+
+      {subjects.length > 0 && (
+        <Group label="Subject">
+          {subjects.map((subject) => (
+            <Toggle
+              key={subject}
+              label={subject}
+              active={filters.selectedSubjects.includes(subject)}
+              onClick={() => onToggleSubject(subject)}
+            />
+          ))}
+        </Group>
+      )}
 
       {/* Only the weeks and days that still have sessions are offered: late
           in the season most of them are gone, and a row of buttons that

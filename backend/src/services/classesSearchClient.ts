@@ -6,21 +6,38 @@ const USER_AGENT = 'chqcal.org class-catalog (https://www.chqcal.org)';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /**
- * Every subject code the search form offers, sent together as its "All
- * Subjects" option does.
+ * The subject codes the search form offers, with the labels it shows.
  *
- * These do not filter. Sending one code returns the same rows as sending
- * another, verified across three subjects — the server ignores the field, so
- * a class's subject cannot be learned by asking for one subject at a time.
- * It is not on the detail page either. The catalog therefore carries no
- * subject, and this exists only to send the field the form sends.
+ * These go in `eventCategories`, NOT `subjectCategories`. The form does have
+ * a `<select name="subjectCategories">`, but choosing from it makes the
+ * page's own JavaScript copy the code into the `eventCategories` field:
+ * that single field carries whatever you are filtering by, weeks or subjects
+ * alike, and the server never reads `subjectCategories` at all. Sending a
+ * subject in the field named after it filters nothing, and the result looks
+ * exactly like a catalog that has no subjects in it.
  */
-const ALL_SUBJECT_CODES = [
-  'L3_CC_YTH', 'L3_CC_ARTS', 'L3_CC_BUSF', 'L3_CC_FOOD', 'L3_CC_DNCE',
-  'L3_CC_GRSP', 'L3_CC_CRFT', 'L3_CC_HLTH', 'L3_CC_HGP', 'L3_CC_LANG',
-  'L3_CC_LIT', 'L3_CC_MAST', 'L3_CC_MUS', 'L3_CC_PDEV', 'L3_CC_PHOT',
-  'L3_CC_RNPH', 'L3_CC_SCTC', 'L3_CC_THEA', 'L3_CC_GEN', 'L3_CC_ONTH',
-].join(', ');
+export const CLASS_SUBJECTS: Record<string, string> = {
+  L3_CC_YTH: 'Youth',
+  L3_CC_ARTS: 'Art',
+  L3_CC_BUSF: 'Business & Finance',
+  L3_CC_FOOD: 'Culinary Arts',
+  L3_CC_DNCE: 'Dance',
+  L3_CC_GRSP: 'Games, Recreation & Sports',
+  L3_CC_CRFT: 'Handcrafts & Hobbies',
+  L3_CC_HLTH: 'Health & Fitness',
+  L3_CC_HGP: 'History, Government & Politics',
+  L3_CC_LANG: 'Language',
+  L3_CC_LIT: 'Literature & Writing',
+  L3_CC_MAST: 'Master Classes',
+  L3_CC_MUS: 'Music',
+  L3_CC_PDEV: 'Personal & Professional Development',
+  L3_CC_PHOT: 'Photography',
+  L3_CC_RNPH: 'Religion & Philosophy',
+  L3_CC_SCTC: 'Science & Technology',
+  L3_CC_THEA: 'Theater',
+  L3_CC_GEN: 'General Interest',
+  L3_CC_ONTH: 'On Theme',
+};
 
 /** Every season week. The search rejects an empty week set — see `search`. */
 const ALL_WEEKS = ['WEEK1', 'WEEK2', 'WEEK3', 'WEEK4', 'WEEK5', 'WEEK6', 'WEEK7', 'WEEK8', 'WEEK9'];
@@ -124,13 +141,15 @@ export class ClassesSearchClient {
    */
   private async search(
     session: SearchSession,
+    categories: string,
     page: number,
   ): Promise<{ rows: ClassSearchRow[]; forbidden: boolean }> {
     const body = new URLSearchParams({
       _csrf: session.csrf,
       text: '',
-      subjectCategories: ALL_SUBJECT_CODES,
-      eventCategories: ALL_WEEKS.join(','),
+      // Never read by the server; sent only because the form sends it.
+      subjectCategories: '',
+      eventCategories: categories,
       page: String(page),
       pageSize: String(PAGE_SIZE),
     });
@@ -145,7 +164,7 @@ export class ClassesSearchClient {
     });
     if (res.status === 403) return { rows: [], forbidden: true };
     if (!res.ok) {
-      throw new Error(`[classes] search failed: ${res.status} (page ${page})`);
+      throw new Error(`[classes] search failed: ${res.status} (${categories}, page ${page})`);
     }
 
     const html = await res.text();
@@ -153,42 +172,75 @@ export class ClassesSearchClient {
     const rows = parseSearchResults(html, this.baseUrl);
     if (rows.length === 0 && html.includes('eventAk=')) {
       throw new Error(
-        `[classes] page ${page} links classes but parsed to none — refusing to publish (markup drift?)`,
+        `[classes] page ${page} of ${categories} links classes but parsed to none — refusing to publish (markup drift?)`,
       );
     }
     return { rows, forbidden: false };
   }
 
   /**
-   * Every class in the catalog, as a single paginated crawl.
+   * Every page of one category selection, as rows keyed by class id.
    *
-   * One pass, not one per subject: the subject field does not filter (see
-   * ALL_SUBJECT_CODES), so crawling per subject would fetch the same catalog
-   * twenty times over.
+   * `categories` is the `eventCategories` value: a comma-separated list of
+   * week codes, subject codes, or both. It must never be empty — the server
+   * answers an empty one with gate passes and daily tickets rather than an
+   * error, which reads as a catalog full of the wrong things.
    */
-  async fetchCatalog(): Promise<ClassSearchRow[]> {
+  private async crawl(categories: string): Promise<Map<string, ClassSearchRow>> {
     let session = this.session ?? (this.session = await this.handshake());
     const byId = new Map<string, ClassSearchRow>();
 
     for (let page = 0; page < MAX_PAGES; page++) {
       await sleep(this.requestDelayMs);
-      let { rows, forbidden } = await this.search(session, page);
+      let { rows, forbidden } = await this.search(session, categories, page);
       if (forbidden) {
         // Sessions expire mid-crawl; re-open one and retry this page once.
         session = this.session = await this.handshake();
-        ({ rows, forbidden } = await this.search(session, page));
+        ({ rows, forbidden } = await this.search(session, categories, page));
         if (forbidden) {
-          throw new Error(`[classes] search rejected a fresh session (page ${page})`);
+          throw new Error(`[classes] search rejected a fresh session (${categories}, page ${page})`);
         }
       }
       if (rows.length === 0) break;
       for (const row of rows) if (!byId.has(row.id)) byId.set(row.id, row);
     }
+    return byId;
+  }
 
+  /** Every class in the catalog, found by asking for every week. */
+  async fetchCatalog(): Promise<ClassSearchRow[]> {
+    const byId = await this.crawl(ALL_WEEKS.join(','));
     if (byId.size === 0) {
       throw new Error('[classes] catalog crawl found no classes — refusing to publish an empty catalog');
     }
     return [...byId.values()];
+  }
+
+  /**
+   * Which subjects each class is listed under, by crawling one subject at a
+   * time — the only way to learn it, since neither the listing rows nor the
+   * detail pages name a subject.
+   *
+   * Classes carry more than one: of 466 in August 2026, 191 had a single
+   * subject and the rest up to seven, "Youth" and "General Interest" being
+   * the common cross-cutting ones. One class belonged to none at all, so an
+   * empty list is a real answer rather than a failed lookup.
+   *
+   * This roughly doubles the cost of a listing crawl, which is why the
+   * caller is expected to do it rarely: a class's subjects do not change
+   * during a season.
+   */
+  async fetchSubjectMap(): Promise<Map<string, string[]>> {
+    const subjects = new Map<string, string[]>();
+    for (const [code, label] of Object.entries(CLASS_SUBJECTS)) {
+      for (const id of (await this.crawl(code)).keys()) {
+        subjects.set(id, [...(subjects.get(id) ?? []), label]);
+      }
+    }
+    if (subjects.size === 0) {
+      throw new Error('[classes] subject crawl matched no classes — refusing to blank every subject');
+    }
+    return subjects;
   }
 
   /**

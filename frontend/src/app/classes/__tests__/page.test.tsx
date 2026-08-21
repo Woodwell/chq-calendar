@@ -18,6 +18,7 @@ const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   summary: 'Watercolor.',
   sessionCount: 1,
   sourceUrl: 'https://tickets.chq.org/class.html?eventAk=CHQ.EVN1',
+  subjects: ['Art'],
   description: 'An introduction.\nMaterials:\n• Sketchbook',
   timezone: 'America/New_York',
   sessions: [{

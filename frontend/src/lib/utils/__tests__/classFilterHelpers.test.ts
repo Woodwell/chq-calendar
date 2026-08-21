@@ -1,5 +1,6 @@
 import {
   EMPTY_CLASS_FILTERS,
+  availableSubjects,
   activeFilterCount,
   hasSessionFilters,
   matchesSearch,
@@ -39,6 +40,7 @@ const chqClass = (id: string, sessions: ClassSession[]): ChqClass => ({
   summary: '',
   sessionCount: sessions.length,
   sourceUrl: `https://tickets.chq.org/class.html?eventAk=${id}`,
+  subjects: [],
   description: '',
   timezone: 'America/New_York',
   sessions,
@@ -187,5 +189,45 @@ describe('activeFilterCount', () => {
     const searching = { ...EMPTY_CLASS_FILTERS, searchTerm: 'yoga' };
     expect(hasSessionFilters(searching)).toBe(false);
     expect(hasActiveFilters(searching)).toBe(true);
+  });
+});
+
+describe('subjects', () => {
+  const art = chqClass('art', [session()]);
+  art.subjects = ['Art', 'Youth'];
+  const music = chqClass('music', [session()]);
+  music.subjects = ['Music'];
+  const none = chqClass('none', [session()]);
+  none.subjects = [];
+
+  it('matches a class carrying any of the chosen subjects', () => {
+    // A class belongs to several subjects at once, so this is an "any of"
+    // rather than the per-session "all of" the pickers use.
+    const pick = (subs: string[]) =>
+      filterClasses([art, music, none], { ...EMPTY_CLASS_FILTERS, selectedSubjects: subs })
+        .map(c => c.id);
+
+    expect(pick(['Art'])).toEqual(['art']);
+    expect(pick(['Youth'])).toEqual(['art']);
+    expect(pick(['Art', 'Music'])).toEqual(['art', 'music']);
+    expect(pick(['Dance'])).toEqual([]);
+  });
+
+  it('excludes a class with no subject when a subject is chosen', () => {
+    // One class in the real catalog belongs to no subject; it simply is not
+    // an Art class, so asking for Art must not turn it up.
+    const found = filterClasses([none], { ...EMPTY_CLASS_FILTERS, selectedSubjects: ['Art'] });
+    expect(found).toEqual([]);
+  });
+
+  it('is a class-level filter, so it does not require a matching session', () => {
+    const finished = chqClass('finished', []);
+    finished.subjects = ['Art'];
+    expect(filterClasses([finished], { ...EMPTY_CLASS_FILTERS, selectedSubjects: ['Art'] }))
+      .toHaveLength(1);
+  });
+
+  it('lists the subjects present, commonest first', () => {
+    expect(availableSubjects([art, music, none])).toEqual(['Art', 'Music', 'Youth']);
   });
 });

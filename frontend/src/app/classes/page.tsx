@@ -18,6 +18,7 @@ import type { ChqClass, ClassSession } from '@/lib/classTypes';
 import {
   activeFilterCount,
   availableDays,
+  availableSubjects,
   availableWeeks,
   filterClasses,
   hasActiveFilters,
@@ -89,6 +90,10 @@ export default function ClassesPage() {
       : classes.filter((c) => c.sessions.length > 0)),
     [classes, filterState.filters.includeFinished],
   );
+
+  // Drawn from what is in scope, so hiding finished classes also drops the
+  // subjects only they had.
+  const subjects = useMemo(() => availableSubjects(inScope), [inScope]);
 
   const visible = useMemo(
     () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
@@ -174,6 +179,7 @@ export default function ClassesPage() {
           <>
             <ClassFilters
               filters={filterState.filters}
+              subjects={subjects}
               weeks={weeks}
               days={days}
               favoriteCount={favorites.favoriteCount}
@@ -183,6 +189,7 @@ export default function ClassesPage() {
               onToggleIncludeFinished={filterState.toggleIncludeFinished}
               onSetAvailability={filterState.setAvailability}
               onSetTimeOfDay={filterState.setTimeOfDay}
+              onToggleSubject={filterState.toggleSubject}
               onToggleWeek={filterState.toggleWeek}
               onToggleDay={filterState.toggleDay}
               onToggleFavoritesOnly={filterState.toggleFavoritesOnly}

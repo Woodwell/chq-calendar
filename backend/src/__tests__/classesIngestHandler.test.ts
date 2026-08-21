@@ -32,7 +32,8 @@ describe('classes ingest handler', () => {
     process.env.CACHE_S3_BUCKET = 'a-bucket';
     run.mockResolvedValue({
       mode: 'full', classes: 0, sessions: 0,
-      detailsFetched: 0, detailFailures: 0, carriedForward: 0, published: false,
+      detailsFetched: 0, detailFailures: 0, carriedForward: 0,
+      subjectsCrawled: false, published: false,
     });
   });
 

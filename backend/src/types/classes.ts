@@ -85,14 +85,16 @@ export interface ClassDetail {
   sessions: ClassSession[];
 }
 
-/**
- * A class in the published catalog: search row plus detail-page content.
- *
- * No subject: the search form offers a subject filter, but it does not
- * filter — every subject returns the same rows — and the detail page does
- * not name one either, so the site gives us no way to learn it.
- */
+/** A class in the published catalog: search row plus detail-page content. */
 export interface ChqClass extends ClassSearchRow, ClassDetail {
+  /**
+   * Every subject the class is listed under, e.g. ["Art", "Youth"].
+   *
+   * A list, not one value: most classes carry two or more, with "Youth" and
+   * "General Interest" cutting across the rest. Empty is a real answer —
+   * one class in the 2026 catalog belonged to no subject at all.
+   */
+  subjects: string[];
   timezone: 'America/New_York';
 }
 

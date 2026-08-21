@@ -93,16 +93,18 @@ describe('ClassesSearchClient.fetchCatalog', () => {
     expect(new Set(rows.map(r => r.id)).size).toBe(6);
   });
 
-  it('crawls the catalog once, not once per subject', async () => {
+  it('crawls the catalog by week, and leaves subjectCategories empty', async () => {
     const { fn, calls } = catalogStub(p => (p === 0 ? SEARCH_FRAGMENT : EMPTY_FRAGMENT));
     await new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchCatalog();
 
-    // The subject field does not filter, so a per-subject crawl would fetch
-    // the whole catalog twenty times. One page of results, one terminator.
     const posts = calls.filter(c => c.url.includes('/post/search/classes'));
     expect(posts).toHaveLength(2);
-    expect(new URLSearchParams(String(posts[0].init.body)).get('subjectCategories'))
-      .toContain('L3_CC_YTH, L3_CC_ARTS');
+    const body = new URLSearchParams(String(posts[0].init.body));
+    // Everything the server filters on rides in eventCategories. The field
+    // actually named subjectCategories is never read — putting a subject
+    // there filters nothing and looks like a catalog with no subjects.
+    expect(body.get('eventCategories')).toBe('WEEK1,WEEK2,WEEK3,WEEK4,WEEK5,WEEK6,WEEK7,WEEK8,WEEK9');
+    expect(body.get('subjectCategories')).toBe('');
   });
 
   it('re-opens an expired session once and carries on', async () => {
@@ -191,5 +193,34 @@ describe('ClassesSearchClient.forEachClassDetail', () => {
     // One unreadable class must not cost the other 465.
     expect(result.fetched).toBe(2);
     expect(result.failures).toEqual([{ id: 'CHQ.EVN2', error: expect.stringContaining('500') }]);
+  });
+});
+
+describe('ClassesSearchClient.fetchSubjectMap', () => {
+  it('asks for each subject through eventCategories and collects the labels', async () => {
+    // Each subject answers with the same one class, so it ends up listed
+    // under all of them — which is the real shape: most classes carry
+    // several subjects, and "Youth" and "General Interest" cut across.
+    const { fn, calls } = stubFetch((url, init) => {
+      if (url.includes('searchclasses.html')) return { body: SEARCH_PAGE };
+      const params = new URLSearchParams(String(init.body));
+      return { body: Number(params.get('page')) === 0 ? SEARCH_FRAGMENT : EMPTY_FRAGMENT };
+    });
+
+    const subjects = await new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchSubjectMap();
+
+    expect(subjects.get('CHQ.EVN1676')).toEqual(expect.arrayContaining(['Youth', 'Art', 'Photography']));
+    const asked = calls
+      .filter(c => c.url.includes('/post/search/classes'))
+      .map(c => new URLSearchParams(String(c.init.body)).get('eventCategories'));
+    expect(asked).toContain('L3_CC_PHOT');
+    expect(asked).not.toContain('');
+  });
+
+  it('refuses to report that no class has any subject', async () => {
+    const { fn } = stubFetch(url =>
+      url.includes('searchclasses.html') ? { body: SEARCH_PAGE } : { body: EMPTY_FRAGMENT });
+    await expect(new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchSubjectMap())
+      .rejects.toThrow(/refusing to blank every subject/);
   });
 });

@@ -4,6 +4,7 @@ import type { ChqClass, ClassSearchRow, ClassesFile } from '../types/classes';
 /** Structural deps, so the local script can substitute file-backed stand-ins. */
 export interface ClassesSource {
   fetchCatalog(): Promise<ClassSearchRow[]>;
+  fetchSubjectMap(): Promise<Map<string, string[]>>;
   forEachClassDetail(
     ids: string[],
     onDetail: (id: string, html: string) => void | Promise<void>,
@@ -37,6 +38,8 @@ export interface ClassesIngestDeps {
 export interface ClassesIngestSummary {
   mode: ClassesIngestMode;
   classes: number;
+  /** True when the run paid for a subject crawl. */
+  subjectsCrawled: boolean;
   sessions: number;
   detailsFetched: number;
   detailFailures: number;
@@ -148,6 +151,7 @@ export async function runClassesIngest(deps: ClassesIngestDeps): Promise<Classes
     detailsFetched: classes.fetched,
     detailFailures: classes.failures,
     carriedForward: classes.carriedForward,
+    subjectsCrawled: classes.subjectsCrawled,
     published,
   };
   console.log('[classes-ingest] summary:', JSON.stringify(summary));
@@ -159,6 +163,7 @@ interface Pass {
   fetched: number;
   failures: number;
   carriedForward: number;
+  subjectsCrawled: boolean;
 }
 
 async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
@@ -176,13 +181,31 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
   }
 
   const priorById = new Map((previous?.classes ?? []).map(c => [c.id, c]));
+
+  // Subjects cost a second full listing crawl, one pass per subject, and a
+  // class's subjects do not change during a season. So they are looked up
+  // only when the catalog contains a class the last run had never seen —
+  // which after the first run is usually none. A class known to belong to no
+  // subject is still "seen", so an empty list does not re-trigger this
+  // every hour for ever.
+  const unseen = rows.filter(r => !priorById.has(r.id));
+  const subjectsCrawled = unseen.length > 0;
+  const subjectMap = subjectsCrawled
+    ? await client.fetchSubjectMap()
+    : new Map<string, string[]>();
+  if (subjectsCrawled) {
+    console.log(`[classes-ingest] ${unseen.length} new class(es); crawled subjects for ${subjectMap.size}`);
+  }
+  const subjectsFor = (id: string): string[] =>
+    subjectMap.get(id) ?? priorById.get(id)?.subjects ?? [];
+
   const details = new Map<string, ChqClass>();
   const { fetched, failures } = await client.forEachClassDetail(
     rows.map(r => r.id),
     (id, html) => {
       const row = rows.find(r => r.id === id)!;
       const detail = parseClassDetail(html, id, year);
-      details.set(id, { ...row, ...detail, timezone: 'America/New_York' });
+      details.set(id, { ...row, ...detail, subjects: subjectsFor(id), timezone: 'America/New_York' });
     },
   );
 
@@ -202,15 +225,18 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
     const prior = priorById.get(row.id);
     if (prior) {
       carriedForward++;
-      return { ...prior, ...row, sessions: prior.sessions };
+      return { ...prior, ...row, subjects: subjectsFor(row.id), sessions: prior.sessions };
     }
     // Never seen before and unreadable now: list it with what the row
     // gives us, and let the next run fill in the sessions.
     carriedForward++;
-    return { ...row, description: '', sessions: [], timezone: 'America/New_York' as const };
+    return {
+      ...row, description: '', sessions: [],
+      subjects: subjectsFor(row.id), timezone: 'America/New_York' as const,
+    };
   });
 
-  return { classes, fetched, failures: failures.length, carriedForward };
+  return { classes, fetched, failures: failures.length, carriedForward, subjectsCrawled };
 }
 
 async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
@@ -222,7 +248,7 @@ async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | 
   const ids = nearTermClassIds(previous.classes, now, spotsHorizonDays);
   if (ids.length === 0) {
     console.log('[classes-ingest] no sessions start within the horizon; nothing to refresh');
-    return { classes: previous.classes, fetched: 0, failures: 0, carriedForward: 0 };
+    return { classes: previous.classes, fetched: 0, failures: 0, carriedForward: 0, subjectsCrawled: false };
   }
 
   const refreshed = new Map<string, ChqClass>();
@@ -235,5 +261,8 @@ async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | 
   // Unlike a full crawl this touches a handful of classes, so a failure just
   // leaves that class as it was until the next pass.
   const classes = previous.classes.map(c => refreshed.get(c.id) ?? c);
-  return { classes, fetched, failures: failures.length, carriedForward: failures.length };
+  return {
+    classes, fetched, failures: failures.length,
+    carriedForward: failures.length, subjectsCrawled: false,
+  };
 }

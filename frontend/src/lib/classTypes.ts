@@ -50,6 +50,11 @@ export interface ChqClass {
   sessionCount: number | null;
   /** The class page on tickets.chq.org, where registration happens. */
   sourceUrl: string;
+  /**
+   * Every subject the class is listed under, e.g. ["Art", "Youth"]. Most
+   * carry more than one; a few carry none.
+   */
+  subjects: string[];
   description: string;
   sessions: ClassSession[];
   timezone: 'America/New_York';

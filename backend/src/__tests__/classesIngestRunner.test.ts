@@ -24,9 +24,15 @@ const row = (id: string): ClassSearchRow => ({
 });
 
 /** A source serving one page of HTML per class id. */
-function source(rows: ClassSearchRow[], html: Record<string, string>, fail: string[] = []): ClassesSource {
+function source(
+  rows: ClassSearchRow[],
+  html: Record<string, string>,
+  fail: string[] = [],
+  subjects: Record<string, string[]> = {},
+): ClassesSource {
   return {
     fetchCatalog: async () => rows,
+    fetchSubjectMap: async () => new Map(Object.entries(subjects)),
     forEachClassDetail: async (ids, onDetail) => {
       const failures: { id: string; error: string }[] = [];
       let fetched = 0;
@@ -135,7 +141,7 @@ describe('runClassesIngest — full crawl', () => {
       generatedAt: '2026-08-19T00:00:00.000Z',
       year: 2026,
       classes: Array.from({ length: 100 }, (_, i) => ({
-        ...row(`CHQ.EVN${i}`), description: '', sessions: [], timezone: 'America/New_York',
+        ...row(`CHQ.EVN${i}`), description: '', sessions: [], subjects: [], timezone: 'America/New_York',
       })) as ChqClass[],
     };
     const s = sink(previous);
@@ -158,6 +164,83 @@ describe('runClassesIngest — full crawl', () => {
   });
 });
 
+describe('runClassesIngest — subjects', () => {
+  const subjects = { 'CHQ.EVN1687': ['Culinary Arts', 'General Interest'] };
+
+  it('attaches every subject a class is listed under', async () => {
+    const s = sink();
+    await runClassesIngest({
+      client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }, [], subjects),
+      sink: s.api, now: NOW, year: 2026, mode: 'full',
+    });
+    expect(s.published[0].classes[0].subjects).toEqual(['Culinary Arts', 'General Interest']);
+  });
+
+  it('does not pay for a subject crawl when it already knows every class', async () => {
+    const first = sink();
+    const summary1 = await runClassesIngest({
+      client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }, [], subjects),
+      sink: first.api, now: NOW, year: 2026, mode: 'full',
+    });
+    expect(summary1.subjectsCrawled).toBe(true);
+
+    // A class's subjects do not change during a season, and the crawl costs a
+    // second full pass over the listing — so the next run reuses them.
+    const second = sink(first.published[0]);
+    let crawled = false;
+    const summary2 = await runClassesIngest({
+      client: {
+        ...source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_2 }),
+        fetchSubjectMap: async () => { crawled = true; return new Map(); },
+      },
+      sink: second.api, now: NOW, year: 2026, mode: 'full',
+    });
+
+    expect(crawled).toBe(false);
+    expect(summary2.subjectsCrawled).toBe(false);
+    expect(second.published[0].classes[0].subjects).toEqual(['Culinary Arts', 'General Interest']);
+  });
+
+  it('crawls again when a class appears that it has never seen', async () => {
+    const first = sink();
+    await runClassesIngest({
+      client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }, [], subjects),
+      sink: first.api, now: NOW, year: 2026, mode: 'full',
+    });
+
+    const second = sink(first.published[0]);
+    const summary = await runClassesIngest({
+      client: source([row('CHQ.EVN1687'), row('CHQ.EVN9999')], {}, [], {
+        ...subjects, 'CHQ.EVN9999': ['Music'],
+      }),
+      sink: second.api, now: NOW, year: 2026, mode: 'full',
+    });
+
+    expect(summary.subjectsCrawled).toBe(true);
+    const byId = new Map(second.published[0].classes.map(c => [c.id, c]));
+    expect(byId.get('CHQ.EVN9999')!.subjects).toEqual(['Music']);
+  });
+
+  it('keeps an empty subject list rather than re-crawling for it every run', async () => {
+    // One class in the real catalog belongs to no subject at all. If "no
+    // subjects" counted as "not yet known", every run would pay for a full
+    // subject crawl chasing it, for ever.
+    const first = sink();
+    await runClassesIngest({
+      client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }, [], {}),
+      sink: first.api, now: NOW, year: 2026, mode: 'full',
+    });
+    expect(first.published[0].classes[0].subjects).toEqual([]);
+
+    const second = sink(first.published[0]);
+    const summary = await runClassesIngest({
+      client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_2 }, [], {}),
+      sink: second.api, now: NOW, year: 2026, mode: 'full',
+    });
+    expect(summary.subjectsCrawled).toBe(false);
+  });
+});
+
 describe('runClassesIngest — spots refresh', () => {
   const published = (): ClassesFile => ({
     generatedAt: '2026-08-19T00:00:00.000Z',
@@ -165,6 +248,7 @@ describe('runClassesIngest — spots refresh', () => {
     classes: [{
       ...row('CHQ.EVN1687'),
       description: '',
+      subjects: [],
       timezone: 'America/New_York',
       // Week 9 session on Aug 26 — six days out from NOW.
       sessions: [{
@@ -214,7 +298,7 @@ describe('the spots horizon', () => {
     generatedAt: '2026-08-19T00:00:00.000Z',
     year: 2026,
     classes: [{
-      ...row('CHQ.EVN1687'), description: '', timezone: 'America/New_York',
+      ...row('CHQ.EVN1687'), description: '', subjects: [], timezone: 'America/New_York',
       sessions: [{
         performanceId: 'CHQ.EVN1687.PRF2', week: 8, dateRangeLabel: 'x',
         startDate: start, endDate: end, daysOfWeek: ['Monday'], timeRangeLabel: 'x',
