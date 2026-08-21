@@ -180,3 +180,40 @@ describe('parseClassDetail', () => {
     });
   });
 });
+
+describe('the same class captured a day apart', () => {
+  // chq-class-detail.html (2026-08-19) and chq-class-detail-next-day.html
+  // (2026-08-20) are the same class, 24 hours apart. Between them, real
+  // enrollment moved and a session aged out — the two kinds of change the
+  // published catalog has to track.
+  const day1 = parseClassDetail(fix('chq-class-detail.html'), 'CHQ.EVN1687', 2026);
+  const day2 = parseClassDetail(fix('chq-class-detail-next-day.html'), 'CHQ.EVN1687', 2026);
+
+  const sessionsById = (d: typeof day1) => new Map(d.sessions.map(s => [s.performanceId, s]));
+
+  it('sees the spots fall as people enroll', () => {
+    const before = sessionsById(day1).get('CHQ.EVN1687.PRF2')!;
+    const after = sessionsById(day2).get('CHQ.EVN1687.PRF2')!;
+
+    expect(before.spotsRemaining).toBe(28);
+    expect(after.spotsRemaining).toBe(26);
+    // Everything else about the session is unchanged, so a diff on this
+    // class reports the count and nothing else.
+    expect({ ...after, spotsRemaining: before.spotsRemaining }).toEqual(before);
+  });
+
+  it('sees a session disappear once its date has passed', () => {
+    // PRF1 ran on Aug 19 and is simply absent the next day — the site does
+    // not mark it finished, it removes it.
+    expect(sessionsById(day1).has('CHQ.EVN1687.PRF1')).toBe(true);
+    expect(sessionsById(day2).has('CHQ.EVN1687.PRF1')).toBe(false);
+    expect(day2.sessions).toHaveLength(1);
+  });
+
+  it('keeps the class itself stable across the two captures', () => {
+    // A vanished session must not read as a vanished class.
+    expect(day2.title).toBe(day1.title);
+    expect(day2.instructor).toBe(day1.instructor);
+    expect(day2.description).toBe(day1.description);
+  });
+});
