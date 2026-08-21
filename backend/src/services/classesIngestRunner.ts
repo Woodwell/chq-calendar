@@ -59,6 +59,20 @@ const MIN_CATALOG_RATIO = 0.8;
 /** Fraction of detail pages that may fail before the run is not worth publishing. */
 const MAX_DETAIL_FAILURE_RATIO = 0.2;
 
+/**
+ * The season the ticket site is currently selling, turning over on October 1
+ * in Institution time — the same rule the web app's `getDefaultYear` uses.
+ *
+ * This is not cosmetic. The site prints session dates with no year at all
+ * ("Aug 19 - Aug 21"), so the year we stamp is the only thing that decides
+ * which season those dates land in. Reading it in Institution time keeps a
+ * run east of Eastern from rolling over a few hours early on September 30.
+ */
+export function institutionSeasonYear(now: Date): number {
+  const [year, month] = institutionDateKey(now).split('-').map(Number);
+  return month >= 10 ? year + 1 : year;
+}
+
 /** Today's date in the Institution's timezone, as YYYY-MM-DD. */
 function institutionDateKey(d: Date): string {
   // en-CA formats as YYYY-MM-DD, which sorts and compares as a string.

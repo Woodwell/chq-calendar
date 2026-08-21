@@ -17,7 +17,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { ClassesSearchClient } from '../services/classesSearchClient';
-import { runClassesIngest, type ClassesIngestMode, type ClassesSink } from '../services/classesIngestRunner';
+import {
+  institutionSeasonYear,
+  runClassesIngest,
+  type ClassesIngestMode,
+  type ClassesSink,
+} from '../services/classesIngestRunner';
 import type { ClassesFile } from '../types/classes';
 
 function parseArgs(argv: string[]): Record<string, string | boolean> {
@@ -48,7 +53,7 @@ function fileSink(out: string): ClassesSink {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
-  const year = Number(args.year ?? new Date().getFullYear());
+  const year = Number(args.year ?? institutionSeasonYear(new Date()));
   const mode = (args.mode ?? 'full') as ClassesIngestMode;
   const out = typeof args.out === 'string'
     ? resolve(args.out)
