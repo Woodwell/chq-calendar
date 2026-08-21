@@ -138,6 +138,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         feedback: resolve(__dirname, 'feedback/index.html'),
+        classes: resolve(__dirname, 'classes/index.html'),
         privacy: resolve(__dirname, 'privacy/index.html'),
         support: resolve(__dirname, 'support/index.html'),
         about: resolve(__dirname, 'about/index.html'),
