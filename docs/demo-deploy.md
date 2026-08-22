@@ -204,10 +204,3 @@ without a site block nothing serves them.
 ```bash
 cd /opt/codeloft/caddy && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 ```
-
-## An aside on the compose file
-
-`network_mode: host` and the `ports:` block do not combine: with host
-networking the container binds the host's ports directly and the `ports:`
-mappings are ignored. Harmless, but it reads as though it is doing something.
-Unrelated to the demo — worth a look when you are next in there.
