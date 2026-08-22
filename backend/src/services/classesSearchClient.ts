@@ -1,4 +1,4 @@
-import { parseSearchResults } from './classesScraper';
+import { normalizeClassSubjects, parseSearchResults } from './classesScraper';
 import type { ClassSearchRow } from '../types/classes';
 
 const DEFAULT_BASE_URL = 'https://tickets.chq.org';
@@ -38,6 +38,19 @@ export const CLASS_SUBJECTS: Record<string, string> = {
   L3_CC_GEN: 'General Interest',
   L3_CC_ONTH: 'On Theme',
 };
+
+/**
+ * The subjects worth spending a listing crawl on.
+ *
+ * Youth is excluded: it is the age field under another name (see
+ * normalizeClassSubjects), and it is the single most expensive subject to
+ * crawl — 355 of 466 classes, 37 pages of the 143 a full subject pass costs.
+ * Paying a quarter of that pass to learn something `ageRange` already says is
+ * not a trade worth making.
+ */
+const CRAWLED_SUBJECTS: Record<string, string> = Object.fromEntries(
+  Object.entries(CLASS_SUBJECTS).filter(([code]) => code !== 'L3_CC_YTH'),
+);
 
 /** Every season week. The search rejects an empty week set — see `search`. */
 const ALL_WEEKS = ['WEEK1', 'WEEK2', 'WEEK3', 'WEEK4', 'WEEK5', 'WEEK6', 'WEEK7', 'WEEK8', 'WEEK9'];
@@ -231,14 +244,22 @@ export class ClassesSearchClient {
    * during a season.
    */
   async fetchSubjectMap(): Promise<Map<string, string[]>> {
-    const subjects = new Map<string, string[]>();
-    for (const [code, label] of Object.entries(CLASS_SUBJECTS)) {
+    const found = new Map<string, string[]>();
+    for (const [code, label] of Object.entries(CRAWLED_SUBJECTS)) {
       for (const id of (await this.crawl(code)).keys()) {
-        subjects.set(id, [...(subjects.get(id) ?? []), label]);
+        found.set(id, [...(found.get(id) ?? []), label]);
       }
     }
-    if (subjects.size === 0) {
+    if (found.size === 0) {
       throw new Error('[classes] subject crawl matched no classes — refusing to blank every subject');
+    }
+    // Normalised here rather than at the call site so every consumer sees the
+    // same answer: a class's subjects are what they are, not a raw membership
+    // list one caller happens to trim.
+    const subjects = new Map<string, string[]>();
+    for (const [id, labels] of found) {
+      const kept = normalizeClassSubjects(labels);
+      if (kept.length > 0) subjects.set(id, kept);
     }
     return subjects;
   }

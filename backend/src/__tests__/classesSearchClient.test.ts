@@ -209,7 +209,12 @@ describe('ClassesSearchClient.fetchSubjectMap', () => {
 
     const subjects = await new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchSubjectMap();
 
-    expect(subjects.get('CHQ.EVN1676')).toEqual(expect.arrayContaining(['Youth', 'Art', 'Photography']));
+    const found = subjects.get('CHQ.EVN1676')!;
+    expect(found).toEqual(expect.arrayContaining(['Art', 'Photography']));
+    // Neither of the two the normaliser removes: Youth is never crawled, and
+    // General Interest only survives where a class has nothing else.
+    expect(found).not.toContain('Youth');
+    expect(found).not.toContain('General Interest');
     const asked = calls
       .filter(c => c.url.includes('/post/search/classes'))
       .map(c => new URLSearchParams(String(c.init.body)).get('eventCategories'));
