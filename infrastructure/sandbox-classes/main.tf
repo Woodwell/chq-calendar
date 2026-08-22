@@ -17,8 +17,11 @@ terraform {
   required_version = ">= 1.0"
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+      source = "hashicorp/aws"
+      # Matches the parent configuration. Not incidental: nodejs24.x, which
+      # every Lambda in this repo uses, is unknown to provider 5.x and fails
+      # validation there.
+      version = "~> 6.0"
     }
   }
 }
