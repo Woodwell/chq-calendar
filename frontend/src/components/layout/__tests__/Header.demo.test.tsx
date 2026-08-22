@@ -29,6 +29,36 @@ function openMenu(area: 'header-desktop' | 'header-mobile') {
   return scope;
 }
 
+describe('the demo badge', () => {
+  it('is absent from a normal build', () => {
+    render(<Header {...defaultProps} />);
+    expect(screen.queryByTestId('demo-badge')).not.toBeInTheDocument();
+  });
+
+  it('marks the calendar itself as a preview', () => {
+    // The classes page has a full banner; the calendar needs to say it too,
+    // or someone landing there has no idea this is not the live site.
+    demoState.isDemoBuild = true;
+    render(<Header {...defaultProps} />);
+
+    const badge = screen.getByTestId('demo-badge');
+    expect(badge).toHaveTextContent(/demo/i);
+    // Events really are live here — only the class counts are a snapshot —
+    // so the tooltip must not claim the whole page is stale.
+    expect(badge).toHaveAttribute('title', expect.stringContaining('Events are live'));
+  });
+
+  it('stays out of the title row, which has no room to give', () => {
+    // At 375px "CHQ Calendar" fits in exactly the space it has; a badge
+    // beside it truncated the title to "CHQ C…".
+    demoState.isDemoBuild = true;
+    render(<Header {...defaultProps} />);
+
+    const identity = screen.getByTestId('header-identity');
+    expect(identity).not.toContainElement(screen.getByTestId('demo-badge'));
+  });
+});
+
 describe('the demo link to /classes', () => {
   it('is absent from a normal build', () => {
     render(<Header {...defaultProps} />);

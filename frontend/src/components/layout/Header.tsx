@@ -59,6 +59,21 @@ export function Header({ selectedYear, availableYears, defaultYear, onYearChange
 
   return (
     <header className="bg-white dark:bg-gray-800 shadow-lg">
+      {/* A strip rather than a pill beside the title. At 375px "CHQ Calendar"
+          fits in exactly the width it has — a badge in that row truncated it
+          to "CHQ C…", which looks broken and undermines the thing it is
+          announcing. Full width costs the title nothing and is harder to
+          miss. */}
+      {isDemoBuild && (
+        <div
+          data-testid="demo-badge"
+          className="bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-center text-xs px-4 py-1"
+          title="Preview build. Events are live; class spot counts are a snapshot."
+        >
+          <span className="font-semibold uppercase tracking-wide">Demo</span>
+          {' — not the live site. Events are live; class spot counts are a snapshot.'}
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center py-2 sm:py-4">
           {/* The cluster stays shrinkable and the title truncates, so a narrow
