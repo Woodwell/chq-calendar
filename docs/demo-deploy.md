@@ -1,11 +1,26 @@
 # Deploying a demo build
 
 How to put an unreleased page in front of a reviewer who is not on your
-network. Written for a droplet already running Caddy; nothing here is part of
-the app, and it can be dropped from any upstream PR.
+network. Written for the droplet's existing Caddy container at
+`/opt/codeloft/caddy`. Nothing here is part of the app, and it can be dropped
+from any upstream PR.
 
-The demo is a static file tree — no runtime, no database, no backend. That is
-what keeps this short.
+The demo is a static file tree — no runtime, no database, no backend — so it
+needs no container of its own. The existing Caddy serves it from a mounted
+directory.
+
+## Paths, host and container
+
+The one thing to keep straight. Caddy runs in a container, so every path in
+the Caddyfile is a path *inside* it:
+
+| Inside the container | On the droplet                              |
+| :------------------- | :------------------------------------------ |
+| `/etc/caddy/Caddyfile` | `/opt/codeloft/caddy/Caddyfile`           |
+| `/srv/chqcal-demo`     | `/opt/codeloft/caddy/sites/chqcal-demo` *(new mount)* |
+| `/var/log/caddy`       | `/opt/codeloft/caddy/logs`                |
+
+rsync targets the droplet column; the Caddyfile refers to the container one.
 
 ## 1. Build
 
@@ -37,13 +52,15 @@ also has to learn every class's subjects.
 ## 3. rsync
 
 ```bash
+ssh droplet 'mkdir -p /opt/codeloft/caddy/sites/chqcal-demo'
+
 rsync -av --delete --dry-run \
   --exclude='data/*.json' \
   --exclude='cache/calendar-cache/all-events-*.json' \
   --exclude='cache/calendar-cache/article-links-*.json' \
   --exclude='cache/calendar-cache/program-links-*.json' \
   --exclude='cache/calendar-cache/years.json' \
-  frontend/out/ droplet:/srv/chqcal-demo/
+  frontend/out/ droplet:/opt/codeloft/caddy/sites/chqcal-demo/
 ```
 
 Drop `--dry-run` once the file list looks right.
@@ -61,12 +78,12 @@ About 4.8 MB rather than 15 MB, because two things are excluded:
 
 ```caddyfile
 demo.example.com {
+	# A container path — see the table above.
 	root * /srv/chqcal-demo
 	encode zstd gzip
 
 	# One password for the whole thing. Generate the hash with:
-	#   caddy hash-password
-	# On Caddy older than 2.8 the directive is `basicauth`.
+	#   docker compose exec caddy caddy hash-password
 	basic_auth {
 		reviewer $2a$14$REPLACE_WITH_HASH
 	}
@@ -124,15 +141,48 @@ Disallow: /` 200
 }
 ```
 
-Then `caddy reload --config /etc/caddy/Caddyfile` (or
-`systemctl reload caddy`).
+Append this to the existing `/opt/codeloft/caddy/Caddyfile` — it is a new
+site block alongside whatever is already there, not a replacement.
+
+```bash
+cd /opt/codeloft/caddy
+docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
 
 ## Before the first deploy
 
+**Mount the site directory.** The container cannot see files that are not
+mounted into it, so add one line to `/opt/codeloft/caddy/docker-compose.yml`:
+
+```yaml
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./sites/chqcal-demo:/srv/chqcal-demo:ro   # <- add this
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./logs:/var/log/caddy
+```
+
+Read-only, because Caddy only ever serves these files.
+
+Adding a volume needs the container recreated — a reload will not pick it up:
+
+```bash
+cd /opt/codeloft/caddy && docker compose up -d
+```
+
+Also before the first deploy:
+
 - **DNS**: an A record for `demo.example.com` pointing at the droplet. Caddy's
   automatic HTTPS needs the name to resolve before it can get a certificate.
-- **Password**: `caddy hash-password`, and paste the hash into the block above.
-- **Directory**: `/srv/chqcal-demo` must exist and be readable by Caddy.
+- **Password**: `docker compose exec caddy caddy hash-password`, and paste the
+  hash into the site block above.
+- **Directory**: create `sites/chqcal-demo` before `docker compose up -d`, or
+  Docker creates it as a root-owned directory and rsync then fails.
+
+Logging needs no change: `./logs` is already mounted, so
+`/var/log/caddy/chqcal-demo.log` lands in `/opt/codeloft/caddy/logs/`.
 
 ## Checking it worked
 
@@ -148,6 +198,16 @@ CloudFront correctly.
 
 ## Taking it down
 
-Delete the site block and reload, or comment out `basic_auth` credentials to
-lock everyone out immediately. The files can stay; without a Caddy site block
-nothing serves them.
+Delete the site block from the Caddyfile and reload. The files can stay;
+without a site block nothing serves them.
+
+```bash
+cd /opt/codeloft/caddy && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+## An aside on the compose file
+
+`network_mode: host` and the `ports:` block do not combine: with host
+networking the container binds the host's ports directly and the `ports:`
+mappings are ignored. Harmless, but it reads as though it is doing something.
+Unrelated to the demo — worth a look when you are next in there.
