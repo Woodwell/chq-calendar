@@ -73,6 +73,7 @@ interface ClassFiltersProps {
   subjects: string[];
   weeks: number[];
   days: string[];
+  meetingDayOptions: number[];
   favoriteCount: number;
   finishedCount: number;
   activeCount: number;
@@ -83,13 +84,15 @@ interface ClassFiltersProps {
   onToggleSubject: (subject: string) => void;
   onToggleWeek: (week: number) => void;
   onToggleDay: (day: string) => void;
+  onToggleMeetingDays: (days: number) => void;
   onToggleFavoritesOnly: () => void;
 }
 
 export function ClassFilters({
-  filters, subjects, weeks, days, favoriteCount, finishedCount, activeCount,
+  filters, subjects, weeks, days, meetingDayOptions, favoriteCount, finishedCount, activeCount,
   onSetSearchTerm, onToggleIncludeFinished,
-  onSetAvailability, onSetTimeOfDay, onToggleSubject, onToggleWeek, onToggleDay, onToggleFavoritesOnly,
+  onSetAvailability, onSetTimeOfDay, onToggleSubject, onToggleWeek, onToggleDay,
+  onToggleMeetingDays, onToggleFavoritesOnly,
 }: ClassFiltersProps) {
   // Open on a wide screen, closed on a phone. Expanded, the pickers run to
   // roughly 590px, which on a 812px-tall screen means scrolling past the
@@ -186,6 +189,23 @@ export function ClassFilters({
               title={day}
               active={filters.selectedDays.includes(day)}
               onClick={() => onToggleDay(day)}
+            />
+          ))}
+        </Group>
+      )}
+
+      {/* How many days a week, as against which days — "only want a one-off"
+          rather than "free on Tuesdays". */}
+      {meetingDayOptions.length > 0 && (
+        <Group label="Meets">
+          {meetingDayOptions.map((n) => (
+            <Toggle
+              key={n}
+              label={String(n)}
+              name={`Meets ${n} ${n === 1 ? 'day' : 'days'} a week`}
+              title={`Classes meeting ${n} ${n === 1 ? 'day' : 'days'} a week`}
+              active={filters.meetingDays.includes(n)}
+              onClick={() => onToggleMeetingDays(n)}
             />
           ))}
         </Group>

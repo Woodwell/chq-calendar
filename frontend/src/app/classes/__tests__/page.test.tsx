@@ -268,6 +268,41 @@ describe('ClassesPage filters', () => {
   });
 });
 
+describe('the "meets" filter', () => {
+  const oneOff = makeClass({
+    id: 'CHQ.ONE', title: 'One Off Tasting',
+    sessions: [{ ...makeClass().sessions[0], performanceId: 'p1', daysOfWeek: ['Friday'] }],
+  });
+  const fullWeek = makeClass({
+    id: 'CHQ.FIVE', title: 'Five Day Intensive',
+    sessions: [{
+      ...makeClass().sessions[0], performanceId: 'p5',
+      daysOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+    }],
+  });
+
+  it('offers only the lengths present in the catalog', async () => {
+    useClassData.mockReturnValue(loaded([oneOff, fullWeek]));
+    render(<ClassesPage />);
+    await openFilters();
+
+    expect(screen.getByRole('button', { name: 'Meets 1 day a week' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Meets 5 days a week' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Meets 3 days a week' })).not.toBeInTheDocument();
+  });
+
+  it('narrows to classes meeting that many days', async () => {
+    useClassData.mockReturnValue(loaded([oneOff, fullWeek]));
+    render(<ClassesPage />);
+    await openFilters();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Meets 1 day a week' }));
+
+    await waitFor(() => expect(screen.queryByText('Five Day Intensive')).not.toBeInTheDocument());
+    expect(screen.getByText('One Off Tasting')).toBeInTheDocument();
+  });
+});
+
 describe('demo build', () => {
   it('shows nothing extra in a normal build', async () => {
     useClassData.mockReturnValue(loaded([makeClass()]));

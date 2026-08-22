@@ -14,6 +14,13 @@ export interface ClassFilterOptions {
   selectedWeeks: number[];
   /** Full day names, e.g. ["Monday"]. Empty means "any day". */
   selectedDays: string[];
+  /**
+   * How many days a week the class meets, 1-5. Empty means "any".
+   *
+   * Distinct from selectedDays: that asks *which* days, this asks *how many*
+   * — the difference between "free on Tuesdays" and "only want a one-off".
+   */
+  meetingDays: number[];
   timeOfDay: TimeOfDay;
   showFavoritesOnly: boolean;
   favoriteIds: Set<string>;
@@ -25,6 +32,7 @@ export const EMPTY_CLASS_FILTERS: ClassFilterOptions = {
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
+  meetingDays: [],
   timeOfDay: 'all',
   showFavoritesOnly: false,
   favoriteIds: new Set(),
@@ -69,6 +77,10 @@ export function sessionMatches(
     options.selectedDays.length > 0 &&
     !session.daysOfWeek.some((day) => options.selectedDays.includes(day))
   ) return false;
+  if (
+    options.meetingDays.length > 0 &&
+    !options.meetingDays.includes(session.daysOfWeek.length)
+  ) return false;
   if (options.timeOfDay !== 'all' && getTimeBucket(session.startDate) !== options.timeOfDay) return false;
   if (
     options.showFavoritesOnly &&
@@ -83,6 +95,7 @@ export function hasSessionFilters(options: ClassFilterOptions): boolean {
     options.availability !== 'all' ||
     options.selectedWeeks.length > 0 ||
     options.selectedDays.length > 0 ||
+    options.meetingDays.length > 0 ||
     options.timeOfDay !== 'all' ||
     options.showFavoritesOnly
   );
@@ -145,6 +158,7 @@ export function activeFilterCount(options: ClassFilterOptions): number {
     (options.availability === 'all' ? 0 : 1) +
     options.selectedWeeks.length +
     options.selectedDays.length +
+    options.meetingDays.length +
     (options.timeOfDay === 'all' ? 0 : 1) +
     (options.showFavoritesOnly ? 1 : 0)
   );
@@ -166,6 +180,19 @@ export function availableSubjects(classes: ChqClass[]): string[] {
   return [...counts.entries()]
     .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
     .map(([name]) => name);
+}
+
+/**
+ * The meeting lengths present, ascending. Every class in the 2026 catalog
+ * met between one and five days a week, but this reads the data rather than
+ * assuming that range holds.
+ */
+export function availableMeetingDays(classes: ChqClass[]): number[] {
+  const lengths = new Set<number>();
+  for (const c of classes) {
+    for (const s of c.sessions) if (s.daysOfWeek.length > 0) lengths.add(s.daysOfWeek.length);
+  }
+  return [...lengths].sort((a, b) => a - b);
 }
 
 /** The days that actually have sessions, in week order. */

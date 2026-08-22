@@ -18,6 +18,7 @@ export interface ClassFilterState {
   availability: AvailabilityFilter;
   selectedWeeks: number[];
   selectedDays: string[];
+  meetingDays: number[];
   timeOfDay: TimeOfDay;
   showFavoritesOnly: boolean;
   /**
@@ -34,6 +35,7 @@ const EMPTY: ClassFilterState = {
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
+  meetingDays: [],
   timeOfDay: 'all',
   showFavoritesOnly: false,
   includeFinished: false,
@@ -56,6 +58,7 @@ function load(): ClassFilterState {
       availability: parsed.availability ?? EMPTY.availability,
       selectedWeeks: Array.isArray(parsed.selectedWeeks) ? parsed.selectedWeeks : [],
       selectedDays: Array.isArray(parsed.selectedDays) ? parsed.selectedDays : [],
+      meetingDays: Array.isArray(parsed.meetingDays) ? parsed.meetingDays : [],
       timeOfDay: parsed.timeOfDay ?? EMPTY.timeOfDay,
       showFavoritesOnly: parsed.showFavoritesOnly ?? false,
       includeFinished: parsed.includeFinished ?? false,
@@ -111,6 +114,10 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, selectedDays: toggle(f.selectedDays, day) }));
   }, []);
 
+  const toggleMeetingDays = useCallback((days: number) => {
+    setFilters((f) => ({ ...f, meetingDays: toggle(f.meetingDays, days) }));
+  }, []);
+
   const toggleFavoritesOnly = useCallback(() => {
     setFilters((f) => ({ ...f, showFavoritesOnly: !f.showFavoritesOnly }));
   }, []);
@@ -131,6 +138,7 @@ export function useClassFilterState() {
     toggleSubject,
     toggleWeek,
     toggleDay,
+    toggleMeetingDays,
     toggleFavoritesOnly,
     clearAll,
   };

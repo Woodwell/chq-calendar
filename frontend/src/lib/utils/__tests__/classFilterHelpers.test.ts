@@ -1,5 +1,6 @@
 import {
   EMPTY_CLASS_FILTERS,
+  availableMeetingDays,
   availableSubjects,
   activeFilterCount,
   hasSessionFilters,
@@ -229,5 +230,55 @@ describe('subjects', () => {
 
   it('lists the subjects present, commonest first', () => {
     expect(availableSubjects([art, music, none])).toEqual(['Art', 'Music', 'Youth']);
+  });
+});
+
+describe('how many days a class meets', () => {
+  const oneOff = chqClass('oneoff', [session({ daysOfWeek: ['Friday'] })]);
+  const threeDay = chqClass('three', [session({ daysOfWeek: ['Monday', 'Wednesday', 'Friday'] })]);
+  const fullWeek = chqClass('five', [session({
+    daysOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+  })]);
+  const all = [oneOff, threeDay, fullWeek];
+
+  it('selects on the count, not on which days', () => {
+    const pick = (n: number[]) =>
+      filterClasses(all, { ...EMPTY_CLASS_FILTERS, meetingDays: n }).map(c => c.id);
+
+    expect(pick([1])).toEqual(['oneoff']);
+    expect(pick([3])).toEqual(['three']);
+    expect(pick([1, 5])).toEqual(['oneoff', 'five']);
+    expect(pick([])).toEqual(['oneoff', 'three', 'five']);
+  });
+
+  it('is independent of the day-of-week filter', () => {
+    // "Meets 1 day" and "meets on Friday" are different questions: the
+    // three-day class also meets on Friday, but is not a one-off.
+    const friday = { ...EMPTY_CLASS_FILTERS, selectedDays: ['Friday'] };
+    expect(filterClasses(all, friday).map(c => c.id)).toEqual(['oneoff', 'three', 'five']);
+    expect(filterClasses(all, { ...friday, meetingDays: [1] }).map(c => c.id)).toEqual(['oneoff']);
+  });
+
+  it('has to hold within one session, not across a class', () => {
+    // A class offering a one-off in Week 8 and a full week in Week 9 is a
+    // one-off only if you take the Week 8 session.
+    const mixed = chqClass('mixed', [
+      session({ performanceId: 'a', week: 8, daysOfWeek: ['Friday'] }),
+      session({ performanceId: 'b', week: 9, daysOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] }),
+    ]);
+    expect(filterClasses([mixed], { ...EMPTY_CLASS_FILTERS, meetingDays: [1] })).toHaveLength(1);
+    expect(filterClasses([mixed], {
+      ...EMPTY_CLASS_FILTERS, meetingDays: [1], selectedWeeks: [9],
+    })).toHaveLength(0);
+  });
+
+  it('offers only the lengths that exist', () => {
+    expect(availableMeetingDays(all)).toEqual([1, 3, 5]);
+    expect(availableMeetingDays([chqClass('none', [])])).toEqual([]);
+  });
+
+  it('counts toward the active filter total', () => {
+    expect(activeFilterCount({ ...EMPTY_CLASS_FILTERS, meetingDays: [1, 2] })).toBe(2);
+    expect(hasActiveFilters({ ...EMPTY_CLASS_FILTERS, meetingDays: [1] })).toBe(true);
   });
 });

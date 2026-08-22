@@ -19,6 +19,7 @@ import type { ChqClass, ClassSession } from '@/lib/classTypes';
 import {
   activeFilterCount,
   availableDays,
+  availableMeetingDays,
   availableSubjects,
   availableWeeks,
   filterClasses,
@@ -79,6 +80,7 @@ export default function ClassesPage() {
 
   const weeks = useMemo(() => availableWeeks(classes), [classes]);
   const days = useMemo(() => availableDays(classes), [classes]);
+  const meetingDayOptions = useMemo(() => availableMeetingDays(classes), [classes]);
 
   // A class with no sessions left cannot be signed up for, and by late
   // August that is most of the catalog. Hidden unless asked for, and the
@@ -211,6 +213,7 @@ export default function ClassesPage() {
               subjects={subjects}
               weeks={weeks}
               days={days}
+              meetingDayOptions={meetingDayOptions}
               favoriteCount={favorites.favoriteCount}
               finishedCount={finished.length}
               activeCount={activeFilterCount(options)}
@@ -221,6 +224,7 @@ export default function ClassesPage() {
               onToggleSubject={filterState.toggleSubject}
               onToggleWeek={filterState.toggleWeek}
               onToggleDay={filterState.toggleDay}
+              onToggleMeetingDays={filterState.toggleMeetingDays}
               onToggleFavoritesOnly={filterState.toggleFavoritesOnly}
             />
 
