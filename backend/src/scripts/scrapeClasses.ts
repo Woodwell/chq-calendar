@@ -17,6 +17,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { ClassesSearchClient } from '../services/classesSearchClient';
+import { loadCatalog } from '../services/classCatalog';
 import {
   institutionSeasonYear,
   runClassesIngest,
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
     now: new Date(),
     year,
     mode,
+    catalog: loadCatalog(),
   });
 
   console.log(`[classes] done in ${((Date.now() - started) / 1000).toFixed(1)}s`);

@@ -1,5 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { ClassesSearchClient } from '../services/classesSearchClient';
+import { loadCatalog } from '../services/classCatalog';
 import { ClassesPublisher } from '../services/classesPublisher';
 import {
   institutionSeasonYear,
@@ -49,5 +50,6 @@ export async function scheduledHandler(evt?: ClassesIngestEvent): Promise<Classe
     now,
     year: evt?.year ?? institutionSeasonYear(now),
     mode,
+    catalog: loadCatalog(),
   });
 }

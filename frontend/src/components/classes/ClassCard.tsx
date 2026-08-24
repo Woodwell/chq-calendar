@@ -1,4 +1,4 @@
-import type { ChqClass, ClassSession } from '@/lib/classTypes';
+import type { ChqClass, ClassProvenance, ClassSession } from '@/lib/classTypes';
 import { classSessionKey } from '@/lib/classTypes';
 
 /**
@@ -98,6 +98,39 @@ interface ClassCardProps {
   sessionMatches?: (session: ClassSession) => boolean;
 }
 
+/**
+ * Says why a class has nothing to book, when the reason is not simply that
+ * the season moved on.
+ *
+ * The distinction is the point: `cancelled` means the crawl looked for a
+ * class scheduled ahead of it and did not find it. `unobserved` means the
+ * class had already finished by the time anything looked, so nothing can be
+ * concluded — it is shown as a record, not as a claim.
+ */
+function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
+  if (provenance.status === 'listed') return null;
+
+  const cancelled = provenance.status === 'cancelled';
+  return (
+    <p className="mt-1">
+      <span
+        className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+          cancelled
+            ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+            : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+        }`}
+      >
+        {cancelled ? 'Cancelled' : 'Not listed online'}
+      </span>
+      <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+        {cancelled
+          ? 'Was in the printed catalog; the ticket site no longer lists it.'
+          : 'From the printed catalog. It had already finished when we looked, so we cannot tell whether it ran.'}
+      </span>
+    </p>
+  );
+}
+
 export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite, sessionMatches }: ClassCardProps) {
   const { sessions } = chqClass;
 
@@ -106,23 +139,30 @@ export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorit
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
-            <a href={chqClass.sourceUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-              {chqClass.title}
-            </a>
+            {/* A class only in the printed catalog has no page to link to.
+                Rendering an empty href would navigate to this page instead. */}
+            {chqClass.sourceUrl ? (
+              <a href={chqClass.sourceUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                {chqClass.title}
+              </a>
+            ) : (
+              chqClass.title
+            )}
           </h2>
+          <ProvenanceNote provenance={chqClass.provenance} />
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
             {chqClass.instructor && <>{chqClass.instructor} · </>}
             {chqClass.ageRangeText}
             {chqClass.priceLabel && <> · {chqClass.priceLabel}</>}
           </p>
-          {chqClass.subjects.length > 0 && (
+          {chqClass.categories.length > 0 && (
             <p className="mt-1 flex flex-wrap gap-1">
-              {chqClass.subjects.map((subject) => (
+              {chqClass.categories.map((category) => (
                 <span
-                  key={subject}
+                  key={category}
                   className="px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
                 >
-                  {subject}
+                  {category}
                 </span>
               ))}
             </p>

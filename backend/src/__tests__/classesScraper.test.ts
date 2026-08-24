@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  normalizeClassSubjects,
   parseAgeRange,
   parseClassDetail,
   parseLastPageIndex,
@@ -221,31 +220,5 @@ describe('the same class captured a day apart', () => {
     expect(day2.title).toBe(day1.title);
     expect(day2.instructor).toBe(day1.instructor);
     expect(day2.description).toBe(day1.description);
-  });
-});
-
-describe('normalizeClassSubjects', () => {
-  it('drops Youth, which is the age field under another name', () => {
-    // It matched "minimum age under 18" on 453 of 466 classes, and none of
-    // its 355 classes admitted only adults. ageRange says it more precisely.
-    expect(normalizeClassSubjects(['Youth', 'Art'])).toEqual(['Art']);
-    expect(normalizeClassSubjects(['Youth'])).toEqual([]);
-  });
-
-  it('keeps General Interest only when it is all a class has', () => {
-    // A filter matching a third of the catalog and co-occurring with every
-    // other subject narrows nothing — but dropping it outright would leave
-    // some classes answering to no subject at all.
-    expect(normalizeClassSubjects(['Art', 'General Interest'])).toEqual(['Art']);
-    expect(normalizeClassSubjects(['General Interest'])).toEqual(['General Interest']);
-    expect(normalizeClassSubjects(['Youth', 'General Interest'])).toEqual(['General Interest']);
-  });
-
-  it('leaves genuine multi-subject classes alone', () => {
-    // 151 classes carry two or more real subjects; "Art + Handcrafts" is the
-    // commonest, and someone might reasonably browse from either side.
-    const subs = ['Art', 'Handcrafts & Hobbies', 'History, Government & Politics'];
-    expect(normalizeClassSubjects(subs)).toEqual(subs);
-    expect(normalizeClassSubjects(['Youth', ...subs, 'General Interest'])).toEqual(subs);
   });
 });

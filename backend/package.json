@@ -31,6 +31,7 @@
     "sync:upload-local": "ts-node src/scripts/uploadToFrontendBucket.ts --save-local",
     "sync:classes": "ts-node src/scripts/scrapeClasses.ts",
     "reconcile:classes": "ts-node src/scripts/reconcileCatalog.ts",
+    "backfill:classes": "ts-node src/scripts/backfillClasses.ts",
     "init-tables": "ts-node src/scripts/initTables.ts",
     "trigger-sync": "ts-node src/scripts/triggerFullSeasonSync.ts",
     "ingest:articles:local": "ts-node src/scripts/runArticleIngestLocal.ts",

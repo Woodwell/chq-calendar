@@ -7,8 +7,8 @@ export type TimeOfDay = 'all' | 'morning' | 'afternoon' | 'evening';
 export interface ClassFilterOptions {
   /** Matched against the class title and instructor, not its sessions. */
   searchTerm: string;
-  /** Subject names; empty means "any". A class matches if it has any of them. */
-  selectedSubjects: string[];
+  /** Category names; empty means "any". A class matches if it has any of them. */
+  selectedCategories: string[];
   availability: AvailabilityFilter;
   /** Empty means "any week". */
   selectedWeeks: number[];
@@ -28,7 +28,7 @@ export interface ClassFilterOptions {
 
 export const EMPTY_CLASS_FILTERS: ClassFilterOptions = {
   searchTerm: '',
-  selectedSubjects: [],
+  selectedCategories: [],
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
@@ -125,7 +125,7 @@ export function matchesSearch(chqClass: ChqClass, term: string): boolean {
  */
 export function filterClasses(classes: ChqClass[], options: ClassFilterOptions): ChqClass[] {
   const term = options.searchTerm.trim();
-  const subjects = options.selectedSubjects;
+  const categories = options.selectedCategories;
   // Only require a matching session when a session-level filter is actually
   // set. A class whose sessions have all passed has none to match, so an
   // unconditional `.some()` would drop every finished class the moment
@@ -133,9 +133,9 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
   const bySession = hasSessionFilters(options);
   return classes.filter((c) => {
     if (!matchesSearch(c, term)) return false;
-    // Subject is a property of the class, not of a session, so it joins the
+    // Category is a property of the class, not of a session, so it joins the
     // search rather than the per-session conjunction.
-    if (subjects.length > 0 && !c.subjects.some((s) => subjects.includes(s))) return false;
+    if (categories.length > 0 && !c.categories.some((k) => categories.includes(k))) return false;
     if (bySession && !c.sessions.some((s) => sessionMatches(c.id, s, options))) return false;
     return true;
   });
@@ -145,7 +145,7 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
 export function hasActiveFilters(options: ClassFilterOptions): boolean {
   return (
     options.searchTerm.trim().length > 0 ||
-    options.selectedSubjects.length > 0 ||
+    options.selectedCategories.length > 0 ||
     hasSessionFilters(options)
   );
 }
@@ -154,7 +154,7 @@ export function hasActiveFilters(options: ClassFilterOptions): boolean {
 export function activeFilterCount(options: ClassFilterOptions): number {
   return (
     (options.searchTerm.trim() ? 1 : 0) +
-    options.selectedSubjects.length +
+    options.selectedCategories.length +
     (options.availability === 'all' ? 0 : 1) +
     options.selectedWeeks.length +
     options.selectedDays.length +
@@ -171,11 +171,11 @@ export function availableWeeks(classes: ChqClass[]): number[] {
   return [...weeks].sort((a, b) => a - b);
 }
 
-/** Subjects present in the catalog, commonest first, then alphabetical. */
-export function availableSubjects(classes: ChqClass[]): string[] {
+/** Categories present in the catalog, commonest first, then alphabetical. */
+export function availableCategories(classes: ChqClass[]): string[] {
   const counts = new Map<string, number>();
   for (const c of classes) {
-    for (const s of c.subjects) counts.set(s, (counts.get(s) ?? 0) + 1);
+    for (const k of c.categories) counts.set(k, (counts.get(k) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))

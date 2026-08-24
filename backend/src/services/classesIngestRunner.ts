@@ -1,10 +1,11 @@
 import { parseClassDetail } from './classesScraper';
+import { mergeCatalog, type CrawledClass } from './classCatalogMerge';
+import type { CatalogClass } from './classCatalog';
 import type { ChqClass, ClassSearchRow, ClassesFile } from '../types/classes';
 
 /** Structural deps, so the local script can substitute file-backed stand-ins. */
 export interface ClassesSource {
   fetchCatalog(): Promise<ClassSearchRow[]>;
-  fetchSubjectMap(): Promise<Map<string, string[]>>;
   forEachClassDetail(
     ids: string[],
     onDetail: (id: string, html: string) => void | Promise<void>,
@@ -31,6 +32,13 @@ export interface ClassesIngestDeps {
   now: Date;
   year: number;
   mode: ClassesIngestMode;
+  /**
+   * The pre-season catalog. It supplies every descriptive field the site does
+   * not expose, and it is why the subject crawl is gone: categories come from
+   * here, so there is no reason to spend 143 paginated requests learning the
+   * site's own taxonomy.
+   */
+  catalog: CatalogClass[];
   /** How far ahead `spots` mode refreshes. */
   spotsHorizonDays?: number;
 }
@@ -38,13 +46,21 @@ export interface ClassesIngestDeps {
 export interface ClassesIngestSummary {
   mode: ClassesIngestMode;
   classes: number;
-  /** True when the run paid for a subject crawl. */
-  subjectsCrawled: boolean;
   sessions: number;
   detailsFetched: number;
   detailFailures: number;
   carriedForward: number;
   published: boolean;
+  /** Listings joined to a catalog row. */
+  matched: number;
+  /** Listed with no catalog row: added after the catalog printed. */
+  listedOnly: number;
+  /** In the catalog, absent from the crawl, and already finished. Unknowable. */
+  unobserved: number;
+  /** In the catalog, scheduled ahead, and absent from the crawl. Gone. */
+  cancelled: number;
+  /** Plausible matches the join declined to make. */
+  needsReview: number;
 }
 
 const DEFAULT_SPOTS_HORIZON_DAYS = 10;
@@ -112,10 +128,31 @@ function nearTermClassIds(classes: ChqClass[], now: Date, horizonDays: number): 
     .map(c => c.id);
 }
 
-/** Compares catalogs ignoring `generatedAt`, which changes on every run. */
+/**
+ * Compares catalogs ignoring the fields that move on their own.
+ *
+ * `generatedAt` changes every run by definition. So does
+ * `provenance.lastObserved`, which is stamped with the crawl date on every
+ * listed class — and that one matters more than it looks: leaving it in would
+ * make the catalog differ every single day by construction, so this function
+ * could never return false and the whole no-op check would be dead code.
+ *
+ * The cost is that `lastObserved` is a lower bound rather than an exact date:
+ * it records the last crawl that published, not the last that looked. For a
+ * class still listed that is invisible, because the file's own `generatedAt`
+ * says when the catalog was current. For one that has since vanished it can
+ * understate by a few days, which is the right way round for a field whose
+ * job is "this was still running as of at least...".
+ */
 function catalogChanged(before: ClassesFile | undefined, after: ClassesFile): boolean {
   if (!before) return true;
-  return JSON.stringify(before.classes) !== JSON.stringify(after.classes);
+  const comparable = (classes: ChqClass[]): string => JSON.stringify(
+    classes.map(({ provenance, ...rest }) => ({
+      ...rest,
+      provenance: { catalog: provenance.catalog, status: provenance.status },
+    })),
+  );
+  return comparable(before.classes) !== comparable(after.classes);
 }
 
 /**
@@ -151,8 +188,8 @@ export async function runClassesIngest(deps: ClassesIngestDeps): Promise<Classes
     detailsFetched: classes.fetched,
     detailFailures: classes.failures,
     carriedForward: classes.carriedForward,
-    subjectsCrawled: classes.subjectsCrawled,
     published,
+    ...classes.merge,
   };
   console.log('[classes-ingest] summary:', JSON.stringify(summary));
   return summary;
@@ -163,18 +200,32 @@ interface Pass {
   fetched: number;
   failures: number;
   carriedForward: number;
-  subjectsCrawled: boolean;
+  merge: MergeCounts;
 }
 
+type MergeCounts = Pick<
+  ClassesIngestSummary,
+  'matched' | 'listedOnly' | 'unobserved' | 'cancelled' | 'needsReview'
+>;
+
+/** A spots pass re-reads sessions only; the join is whatever the last full crawl decided. */
+const CARRIED_MERGE: MergeCounts = {
+  matched: 0, listedOnly: 0, unobserved: 0, cancelled: 0, needsReview: 0,
+};
+
 async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
-  const { client, year } = deps;
+  const { client, year, now, catalog } = deps;
   const rows = await client.fetchCatalog();
 
   if (previous && previous.classes.length > 0) {
-    const ratio = rows.length / previous.classes.length;
+    // Compare like with like: the published file also holds catalog-only
+    // classes, which no crawl returns, so counting them here would make every
+    // run look like a collapse.
+    const priorListed = previous.classes.filter(c => c.provenance.status === 'listed').length;
+    const ratio = priorListed > 0 ? rows.length / priorListed : 1;
     if (ratio < MIN_CATALOG_RATIO) {
       throw new Error(
-        `[classes-ingest] catalog fell from ${previous.classes.length} to ${rows.length} classes ` +
+        `[classes-ingest] listing fell from ${priorListed} to ${rows.length} classes ` +
         `(${Math.round(ratio * 100)}%) — refusing to publish a likely truncated crawl`,
       );
     }
@@ -182,31 +233,13 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
 
   const priorById = new Map((previous?.classes ?? []).map(c => [c.id, c]));
 
-  // Subjects cost a second full listing crawl, one pass per subject, and a
-  // class's subjects do not change during a season. So they are looked up
-  // only when the catalog contains a class the last run had never seen —
-  // which after the first run is usually none. Note this keys off having
-  // seen the class, not off it having subjects: were "no subjects" treated
-  // as "not yet known", a single subject-less class would re-trigger a full
-  // subject crawl every hour for ever.
-  const unseen = rows.filter(r => !priorById.has(r.id));
-  const subjectsCrawled = unseen.length > 0;
-  const subjectMap = subjectsCrawled
-    ? await client.fetchSubjectMap()
-    : new Map<string, string[]>();
-  if (subjectsCrawled) {
-    console.log(`[classes-ingest] ${unseen.length} new class(es); crawled subjects for ${subjectMap.size}`);
-  }
-  const subjectsFor = (id: string): string[] =>
-    subjectMap.get(id) ?? priorById.get(id)?.subjects ?? [];
-
-  const details = new Map<string, ChqClass>();
+  const details = new Map<string, CrawledClass>();
   const { fetched, failures } = await client.forEachClassDetail(
     rows.map(r => r.id),
     (id, html) => {
       const row = rows.find(r => r.id === id)!;
       const detail = parseClassDetail(html, id, year);
-      details.set(id, { ...row, ...detail, subjects: subjectsFor(id), timezone: 'America/New_York' });
+      details.set(id, { ...row, ...detail, timezone: 'America/New_York' });
     },
   );
 
@@ -220,24 +253,34 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
   // saw. Publishing it with none would read exactly like "this class is
   // over", which is the one thing a failed fetch must not be allowed to say.
   let carriedForward = 0;
-  const classes = rows.map((row) => {
+  const crawled: CrawledClass[] = rows.map((row) => {
     const fresh = details.get(row.id);
     if (fresh) return fresh;
     const prior = priorById.get(row.id);
     if (prior) {
       carriedForward++;
-      return { ...prior, ...row, subjects: subjectsFor(row.id), sessions: prior.sessions };
+      return { ...prior, ...row, sessions: prior.sessions };
     }
     // Never seen before and unreadable now: list it with what the row
     // gives us, and let the next run fill in the sessions.
     carriedForward++;
-    return {
-      ...row, description: '', sessions: [],
-      subjects: subjectsFor(row.id), timezone: 'America/New_York' as const,
-    };
+    return { ...row, description: '', sessions: [], timezone: 'America/New_York' as const };
   });
 
-  return { classes, fetched, failures: failures.length, carriedForward, subjectsCrawled };
+  const { classes, summary } = mergeCatalog({
+    catalog,
+    listed: crawled,
+    previous: previous?.classes,
+    crawlDate: institutionDateKey(now),
+  });
+
+  console.log(
+    `[classes-ingest] joined ${summary.matched}/${crawled.length} listings to the catalog; ` +
+    `${summary.listedOnly} listed-only, ${summary.unobserved} unobserved, ` +
+    `${summary.cancelled} cancelled, ${summary.needsReview} for review`,
+  );
+
+  return { classes, fetched, failures: failures.length, carriedForward, merge: summary };
 }
 
 async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
@@ -246,17 +289,30 @@ async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | 
     throw new Error('[classes-ingest] spots refresh has no published catalog to refresh — run a full crawl first');
   }
 
-  const ids = nearTermClassIds(previous.classes, now, spotsHorizonDays);
+  // Only listed classes have a page to re-read. Catalog-only records carry no
+  // sessions by design, so they are never in scope here and pass through
+  // untouched — including their status, which only a full crawl can revise.
+  const listedNow = previous.classes.filter(c => c.provenance.status === 'listed');
+  const ids = nearTermClassIds(listedNow, now, spotsHorizonDays);
   if (ids.length === 0) {
     console.log('[classes-ingest] no sessions start within the horizon; nothing to refresh');
-    return { classes: previous.classes, fetched: 0, failures: 0, carriedForward: 0, subjectsCrawled: false };
+    return {
+      classes: previous.classes, fetched: 0, failures: 0,
+      carriedForward: 0, merge: CARRIED_MERGE,
+    };
   }
 
   const refreshed = new Map<string, ChqClass>();
   const { fetched, failures } = await client.forEachClassDetail(ids, (id, html) => {
     const prior = previous.classes.find(c => c.id === id)!;
     const detail = parseClassDetail(html, id, year);
-    refreshed.set(id, { ...prior, ...detail });
+    // The detail page carries sessions and description; everything the
+    // catalog contributed stays as the last full crawl left it.
+    refreshed.set(id, {
+      ...prior,
+      ...detail,
+      provenance: { ...prior.provenance, lastObserved: institutionDateKey(now) },
+    });
   });
 
   // Unlike a full crawl this touches a handful of classes, so a failure just
@@ -264,6 +320,6 @@ async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | 
   const classes = previous.classes.map(c => refreshed.get(c.id) ?? c);
   return {
     classes, fetched, failures: failures.length,
-    carriedForward: failures.length, subjectsCrawled: false,
+    carriedForward: failures.length, merge: CARRIED_MERGE,
   };
 }

@@ -85,17 +85,61 @@ export interface ClassDetail {
   sessions: ClassSession[];
 }
 
+/**
+ * What a crawl was able to establish about a class existing.
+ *
+ * `unobserved` and `cancelled` are deliberately different words for
+ * deliberately different claims, because a crawl can only see forwards: a
+ * class cannot be created or cancelled in the past, so a crawl on date D can
+ * say a class scheduled after D is gone, but says nothing at all about one
+ * whose sessions had all finished before D.
+ */
+export type ClassStatus =
+  /** Seen in the crawl. */
+  | 'listed'
+  /** In the catalog, not crawled, and its sessions were already over. Unknowable. */
+  | 'unobserved'
+  /** In the catalog, scheduled after the crawl, and absent from it. Gone. */
+  | 'cancelled';
+
+/** Which source said what, and when the class was last actually seen. */
+export interface ClassProvenance {
+  /** The pre-season catalog describes this class. */
+  catalog: boolean;
+  /** ISO date of the most recent crawl that listed it, or null if never. */
+  lastObserved: string | null;
+  status: ClassStatus;
+}
+
+/** Materials a class needs, from the catalog. The site does not expose these. */
+export interface ClassMaterials {
+  /** Extra materials fee as printed, e.g. "$20". Empty when none. */
+  fee: string;
+  student: boolean;
+  instructor: boolean;
+}
+
 /** A class in the published catalog: search row plus detail-page content. */
 export interface ChqClass extends ClassSearchRow, ClassDetail {
   /**
-   * Every subject the class is listed under, e.g. ["Art", "Youth"].
-   *
-   * A list, not one value: most classes carry two or more, with "Youth" and
-   * "General Interest" cutting across the rest. Every class in the 2026
-   * catalog had at least one, but empty is still treated as an answer rather
-   * than a gap — see the runner for why that distinction has to hold.
+   * Row id in config/SpecialStudies.csv, or null when the site added the
+   * class after the catalog went to print — Masters Series masterclasses,
+   * mostly, which are booked late by design.
    */
-  subjects: string[];
+  catalogId: string | null;
+  /**
+   * Editorial categories, in the printed catalog's vocabulary. Empty when the
+   * catalog does not cover the class: an honest gap beats a guessed label,
+   * and the site's own subject taxonomy is deliberately not mapped onto this.
+   */
+  categories: string[];
+  /** Catalog only; null when the catalog does not cover the class. */
+  materials: ClassMaterials | null;
+  /** Tuition as printed by the catalog, e.g. "$115". Null when unknown. */
+  fee: string | null;
+  /** Room within `location`, which the site runs together into one string. */
+  room: string | null;
+  provenance: ClassProvenance;
   timezone: 'America/New_York';
 }
 

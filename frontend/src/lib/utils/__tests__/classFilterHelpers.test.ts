@@ -1,7 +1,7 @@
 import {
   EMPTY_CLASS_FILTERS,
   availableMeetingDays,
-  availableSubjects,
+  availableCategories,
   activeFilterCount,
   hasSessionFilters,
   matchesSearch,
@@ -31,6 +31,11 @@ const session = (over: Partial<ClassSession> = {}): ClassSession => ({
 const chqClass = (id: string, sessions: ClassSession[]): ChqClass => ({
   id,
   title: id,
+  catalogId: null,
+  materials: null,
+  fee: null,
+  room: null,
+  provenance: { catalog: false, lastObserved: '2026-08-22', status: 'listed' },
   weeksLabel: 'Week 8',
   daysLabel: 'M',
   location: 'Pier Building Classroom',
@@ -41,7 +46,7 @@ const chqClass = (id: string, sessions: ClassSession[]): ChqClass => ({
   summary: '',
   sessionCount: sessions.length,
   sourceUrl: `https://tickets.chq.org/class.html?eventAk=${id}`,
-  subjects: [],
+  categories: [],
   description: '',
   timezone: 'America/New_York',
   sessions,
@@ -193,19 +198,19 @@ describe('activeFilterCount', () => {
   });
 });
 
-describe('subjects', () => {
+describe('categories', () => {
   const art = chqClass('art', [session()]);
-  art.subjects = ['Art', 'Youth'];
+  art.categories = ['Art', 'Youth'];
   const music = chqClass('music', [session()]);
-  music.subjects = ['Music'];
+  music.categories = ['Music'];
   const none = chqClass('none', [session()]);
-  none.subjects = [];
+  none.categories = [];
 
-  it('matches a class carrying any of the chosen subjects', () => {
-    // A class belongs to several subjects at once, so this is an "any of"
+  it('matches a class carrying any of the chosen categories', () => {
+    // A class belongs to several categories at once, so this is an "any of"
     // rather than the per-session "all of" the pickers use.
-    const pick = (subs: string[]) =>
-      filterClasses([art, music, none], { ...EMPTY_CLASS_FILTERS, selectedSubjects: subs })
+    const pick = (picked: string[]) =>
+      filterClasses([art, music, none], { ...EMPTY_CLASS_FILTERS, selectedCategories: picked })
         .map(c => c.id);
 
     expect(pick(['Art'])).toEqual(['art']);
@@ -214,22 +219,22 @@ describe('subjects', () => {
     expect(pick(['Dance'])).toEqual([]);
   });
 
-  it('excludes a class with no subject when a subject is chosen', () => {
-    // One class in the real catalog belongs to no subject; it simply is not
-    // an Art class, so asking for Art must not turn it up.
-    const found = filterClasses([none], { ...EMPTY_CLASS_FILTERS, selectedSubjects: ['Art'] });
+  it('excludes a class with no category when a category is chosen', () => {
+    // A class the printed catalog does not cover carries no category at all;
+    // it simply is not an Art class, so asking for Art must not turn it up.
+    const found = filterClasses([none], { ...EMPTY_CLASS_FILTERS, selectedCategories: ['Art'] });
     expect(found).toEqual([]);
   });
 
   it('is a class-level filter, so it does not require a matching session', () => {
     const finished = chqClass('finished', []);
-    finished.subjects = ['Art'];
-    expect(filterClasses([finished], { ...EMPTY_CLASS_FILTERS, selectedSubjects: ['Art'] }))
+    finished.categories = ['Art'];
+    expect(filterClasses([finished], { ...EMPTY_CLASS_FILTERS, selectedCategories: ['Art'] }))
       .toHaveLength(1);
   });
 
   it('lists the subjects present, commonest first', () => {
-    expect(availableSubjects([art, music, none])).toEqual(['Art', 'Music', 'Youth']);
+    expect(availableCategories([art, music, none])).toEqual(['Art', 'Music', 'Youth']);
   });
 });
 

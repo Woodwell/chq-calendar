@@ -19,6 +19,11 @@ vi.mock('@/lib/demoMode', async () => {
 const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   id: 'CHQ.EVN1',
   title: 'Watercolors for Beginners',
+  catalogId: null,
+  materials: null,
+  fee: null,
+  room: null,
+  provenance: { catalog: false, lastObserved: '2026-08-22', status: 'listed' },
   weeksLabel: 'Week 8',
   daysLabel: 'M, Tu, W, Th, F',
   location: 'Pier Building Classroom',
@@ -29,7 +34,7 @@ const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   summary: 'Watercolor.',
   sessionCount: 1,
   sourceUrl: 'https://tickets.chq.org/class.html?eventAk=CHQ.EVN1',
-  subjects: ['Art'],
+  categories: ['Art'],
   description: 'An introduction.\nMaterials:\n• Sketchbook',
   timezone: 'America/New_York',
   sessions: [{
@@ -107,6 +112,39 @@ describe('ClassesPage', () => {
     expect(screen.getByText(/Kim Kloecker/)).toBeInTheDocument();
     expect(screen.getByText('12 spots left')).toBeInTheDocument();
     expect(screen.getByText(/Week 8/)).toBeInTheDocument();
+  });
+
+  it('marks a catalog class the crawl never saw, and offers no dead link', async () => {
+    // Published as history: it carries the richest description in the
+    // dataset, and withholding it would discard the only record of a class
+    // the ticket site has already dropped.
+    useClassData.mockReturnValue(loaded([makeClass({
+      id: 'catalog:12', catalogId: '12', title: 'Long Since Finished',
+      sourceUrl: '', sessions: [],
+      provenance: { catalog: true, lastObserved: null, status: 'unobserved' },
+    })]));
+    render(<ClassesPage />);
+
+    // Hidden with the rest of the finished catalog until asked for.
+    await includeFinished();
+
+    expect(await screen.findByText('Not listed online')).toBeInTheDocument();
+    // No page to register on, so the title must not be a link to nowhere.
+    expect(screen.queryByRole('link', { name: 'Long Since Finished' })).not.toBeInTheDocument();
+    expect(screen.getByText('Long Since Finished')).toBeInTheDocument();
+  });
+
+  it('says cancelled only when the crawl could actually tell', async () => {
+    useClassData.mockReturnValue(loaded([makeClass({
+      id: 'catalog:13', catalogId: '13', title: 'Pulled From The Schedule',
+      sourceUrl: '', sessions: [],
+      provenance: { catalog: true, lastObserved: '2026-08-13', status: 'cancelled' },
+    })]));
+    render(<ClassesPage />);
+
+    await includeFinished();
+    expect(await screen.findByText('Cancelled')).toBeInTheDocument();
+    expect(screen.queryByText('Not listed online')).not.toBeInTheDocument();
   });
 
   it('sends people to the ticket site to register', async () => {

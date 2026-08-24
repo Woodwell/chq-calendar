@@ -195,37 +195,3 @@ describe('ClassesSearchClient.forEachClassDetail', () => {
     expect(result.failures).toEqual([{ id: 'CHQ.EVN2', error: expect.stringContaining('500') }]);
   });
 });
-
-describe('ClassesSearchClient.fetchSubjectMap', () => {
-  it('asks for each subject through eventCategories and collects the labels', async () => {
-    // Each subject answers with the same one class, so it ends up listed
-    // under all of them — which is the real shape: most classes carry
-    // several subjects, and "Youth" and "General Interest" cut across.
-    const { fn, calls } = stubFetch((url, init) => {
-      if (url.includes('searchclasses.html')) return { body: SEARCH_PAGE };
-      const params = new URLSearchParams(String(init.body));
-      return { body: Number(params.get('page')) === 0 ? SEARCH_FRAGMENT : EMPTY_FRAGMENT };
-    });
-
-    const subjects = await new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchSubjectMap();
-
-    const found = subjects.get('CHQ.EVN1676')!;
-    expect(found).toEqual(expect.arrayContaining(['Art', 'Photography']));
-    // Neither of the two the normaliser removes: Youth is never crawled, and
-    // General Interest only survives where a class has nothing else.
-    expect(found).not.toContain('Youth');
-    expect(found).not.toContain('General Interest');
-    const asked = calls
-      .filter(c => c.url.includes('/post/search/classes'))
-      .map(c => new URLSearchParams(String(c.init.body)).get('eventCategories'));
-    expect(asked).toContain('L3_CC_PHOT');
-    expect(asked).not.toContain('');
-  });
-
-  it('refuses to report that no class has any subject', async () => {
-    const { fn } = stubFetch(url =>
-      url.includes('searchclasses.html') ? { body: SEARCH_PAGE } : { body: EMPTY_FRAGMENT });
-    await expect(new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchSubjectMap())
-      .rejects.toThrow(/refusing to blank every subject/);
-  });
-});

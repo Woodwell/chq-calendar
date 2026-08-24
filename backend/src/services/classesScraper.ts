@@ -60,33 +60,6 @@ export function parseAgeRange(raw: string): ClassAgeRange {
 }
 
 /**
- * Subjects that describe the class, dropping the two that do not.
- *
- * **Youth** is the age field wearing a subject's clothes: it matches
- * "minimum age under 18" on 453 of 466 classes, and none of its 355 classes
- * admits only adults. It says nothing `ageRange` does not say more precisely,
- * and the 13 disagreements are cases where it is the *less* accurate of the
- * two. Not crawled at all (see CRAWLED_SUBJECTS), and dropped here as well so
- * the rule survives someone putting it back.
- *
- * **General Interest** is a catch-all rather than a subject: it covered 142
- * classes, co-occurred with all eighteen others, and stood alone twice. As a
- * filter that matches a third of the catalog it narrows nothing. It is kept
- * only where it is all a class has, so those classes still answer to some
- * subject rather than none.
- *
- * On this catalog the pair took 1,154 class-subject rows down to 670, left
- * 314 classes with exactly one subject, and left exactly one class — a
- * Youth-only listing — with no subject at all. That last is an accepted cost:
- * a subject-less class is still reachable by search, week and availability.
- */
-export function normalizeClassSubjects(subjects: string[]): string[] {
-  const kept = subjects.filter((s) => s !== 'Youth');
-  if (kept.length > 1) return kept.filter((s) => s !== 'General Interest');
-  return kept;
-}
-
-/**
  * Turns a published description into plain text, keeping its line structure.
  *
  * Descriptions carry light markup — paragraph breaks, and materials lists as

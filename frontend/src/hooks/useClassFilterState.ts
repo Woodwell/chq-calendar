@@ -14,7 +14,7 @@ const STORAGE_KEY = 'chq-classes-user-state';
 
 export interface ClassFilterState {
   searchTerm: string;
-  selectedSubjects: string[];
+  selectedCategories: string[];
   availability: AvailabilityFilter;
   selectedWeeks: number[];
   selectedDays: string[];
@@ -31,7 +31,7 @@ export interface ClassFilterState {
 
 const EMPTY: ClassFilterState = {
   searchTerm: '',
-  selectedSubjects: [],
+  selectedCategories: [],
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
@@ -54,7 +54,7 @@ function load(): ClassFilterState {
     if (!parsed.lastSaved || Date.now() - parsed.lastSaved > USER_STATE_EXPIRY_MS) return EMPTY;
     return {
       searchTerm: typeof parsed.searchTerm === 'string' ? parsed.searchTerm : '',
-      selectedSubjects: Array.isArray(parsed.selectedSubjects) ? parsed.selectedSubjects : [],
+      selectedCategories: Array.isArray(parsed.selectedCategories) ? parsed.selectedCategories : [],
       availability: parsed.availability ?? EMPTY.availability,
       selectedWeeks: Array.isArray(parsed.selectedWeeks) ? parsed.selectedWeeks : [],
       selectedDays: Array.isArray(parsed.selectedDays) ? parsed.selectedDays : [],
@@ -102,8 +102,8 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, timeOfDay }));
   }, []);
 
-  const toggleSubject = useCallback((subject: string) => {
-    setFilters((f) => ({ ...f, selectedSubjects: toggle(f.selectedSubjects, subject) }));
+  const toggleCategory = useCallback((subject: string) => {
+    setFilters((f) => ({ ...f, selectedCategories: toggle(f.selectedCategories, subject) }));
   }, []);
 
   const toggleWeek = useCallback((week: number) => {
@@ -135,7 +135,7 @@ export function useClassFilterState() {
     toggleIncludeFinished,
     setAvailability,
     setTimeOfDay,
-    toggleSubject,
+    toggleCategory,
     toggleWeek,
     toggleDay,
     toggleMeetingDays,

@@ -154,7 +154,7 @@ export function ClassFilters({
             <Toggle
               key={subject}
               label={subject}
-              active={filters.selectedSubjects.includes(subject)}
+              active={filters.selectedCategories.includes(subject)}
               onClick={() => onToggleSubject(subject)}
             />
           ))}

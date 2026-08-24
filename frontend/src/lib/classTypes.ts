@@ -34,6 +34,31 @@ export interface ClassSession {
   availability: ClassAvailability;
 }
 
+/**
+ * What the last crawl could establish about the class existing.
+ *
+ * `unobserved` is not a softer `cancelled`. A crawl can only see forwards —
+ * a class cannot be created or cancelled in the past — so a class whose
+ * sessions had all finished before the crawl simply cannot be spoken about.
+ * `cancelled` is reserved for one scheduled *after* the crawl and missing
+ * from it, which is the only case where absence is evidence.
+ */
+export type ClassStatus = 'listed' | 'unobserved' | 'cancelled';
+
+export interface ClassProvenance {
+  catalog: boolean;
+  /** ISO date of the last crawl that saw it, or null if never seen. */
+  lastObserved: string | null;
+  status: ClassStatus;
+}
+
+/** Materials the class needs, and who is expected to bring them. */
+export interface ClassMaterials {
+  fee: string;
+  student: boolean;
+  instructor: boolean;
+}
+
 export interface ChqClass {
   /** Event id on the ticket site, e.g. "CHQ.EVN1687". */
   id: string;
@@ -51,10 +76,20 @@ export interface ChqClass {
   /** The class page on tickets.chq.org, where registration happens. */
   sourceUrl: string;
   /**
-   * Every subject the class is listed under, e.g. ["Art", "Youth"]. Most
-   * carry more than one; a few carry none.
+   * Editorial categories from the printed catalog, e.g. ["Art", "Youth"].
+   * Empty when the catalog does not cover the class — an honest gap rather
+   * than a label guessed from the ticket site's own taxonomy.
    */
-  subjects: string[];
+  categories: string[];
+  /** Row id in the printed catalog, or null when only the site knows it. */
+  catalogId: string | null;
+  /** Catalog only; null when the catalog does not cover the class. */
+  materials: ClassMaterials | null;
+  /** Tuition as the catalog prints it, e.g. "$115". Null when unknown. */
+  fee: string | null;
+  /** Room within `location`, which the ticket site runs into one string. */
+  room: string | null;
+  provenance: ClassProvenance;
   description: string;
   sessions: ClassSession[];
   timezone: 'America/New_York';
