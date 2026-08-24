@@ -13,12 +13,12 @@ embedded in prose.
 
 There is a better source. Chautauqua publishes the Special Studies catalog as
 a PDF before the season, and `config/SpecialStudies.csv` is that document
-transcribed: 493 rows, 480 distinct classes, with fields the site never
+transcribed: 492 rows, 483 distinct classes, with fields the site never
 exposes.
 
 | The catalog has | The crawl gets |
 | --- | --- |
-| `Min Age` / `Max Age` as numbers (487 of 493 filled) | free text, parsed best-effort |
+| `Min Age` / `Max Age` as numbers (486 of 492 filled) | free text, parsed best-effort |
 | `Category`, the editorial subject | membership across 19 subjects, 143 pages |
 | `W1`–`W9`, `Mon`–`Sun` as booleans | parsed from prose |
 | `Start` / `End` as times | parsed from `"4–4:30p.m."` |
@@ -59,15 +59,21 @@ A crawl on date D can say three things and no more:
   It may have run and been delisted, or never happened at all. The crawl
   cannot tell, and neither can we.
 
-That last case is not hypothetical. Of the 480 catalog classes, 50 were never
+That last case is not hypothetical. Of the 483 catalog classes, 49 were never
 seen in an August crawl, and their absence tracks how long ago they finished:
 
 ```
 rate of "in catalog, never listed", by the class's last scheduled week
-   week 1:   8.1%      week 4:  21.3%      week 7:   6.5%
-   week 2:  10.0%      week 5:  11.1%      week 8:   5.1%
-   week 3:  23.5%      week 6:   8.2%      week 9:   2.7%
+   week 1:   8.1%  (3/37)    week 4:  21.7%  (10/46)   week 7:   7.0%  (4/57)
+   week 2:  10.2%  (5/49)    week 5:  11.1%  (7/63)    week 8:   3.4%  (2/58)
+   week 3:  24.0%  (12/50)   week 6:   8.3%  (4/48)    week 9:   2.7%  (2/75)
 ```
+
+Counted per distinct class, not per catalog row: a class the catalog lists
+twice because it runs two offerings counts once, and counts as observed if
+either offering was seen. Per row the series is noisier — week 7 rises above
+week 6 — because the rows that split into offerings are not spread evenly
+across the weeks.
 
 From week 3 onward the rate falls steadily as the last week approaches the
 crawl date. If the listing kept every class all season, that line would be
@@ -79,7 +85,7 @@ being read off a cross-section. Crawls at intervals would settle it. Either
 way the rule holds, because it is a statement about what can be known.
 
 **Consequences.** Backfill from a late-season crawl cannot establish
-cancellation, so the 50 are recorded as *unobserved*, never as *cancelled*.
+cancellation, so the 49 are recorded as *unobserved*, never as *cancelled*.
 Cancellation is only ever asserted when a class the catalog scheduled in the
 future is missing from a crawl made before that date — which means it can only
 be detected by crawling through the season, not retrospectively.
@@ -121,7 +127,7 @@ per-day listings, then instructor as a tiebreak, then rename detection
 accepted only when the instructor agrees.
 
 Against August data: 441 of 466 listings matched (94.6%), 25 listed but not in
-the catalog, 50 in the catalog but unobserved, 5 held for review — all five
+the catalog, 49 in the catalog but unobserved, 5 held for review — all five
 genuine matches it was right not to assume.
 
 The 25 are mostly Masters Series masterclasses, which are booked after the
@@ -165,18 +171,34 @@ The full crawl still runs, because existence has to be observed. But it stops
 carrying the 143-page subject pass, which is the single largest cost in it: a
 first crawl of a season falls from ~605s to roughly 175s.
 
-## Open questions
+## Decisions
 
-**Where the catalog lives.** `config/SpecialStudies.csv` is checked in and
-hand-derived from a PDF once a season. That is honest about what it is, but it
-means a season begins with a manual step, and the file has at least one
-transcription artifact already (a duplicated *Design Your Own Board Game*).
+Taken 2026-08-24. All three questions this document raised are now closed.
 
-**Whether the sheet should be corrected or accepted.** It is a transcription;
-where it disagrees with the site about a time or a room, the crawl wins
-anyway. Only categories and materials have no second source.
+**The catalog stays a checked-in CSV.** `config/SpecialStudies.csv` is the base
+catalog, hand-derived from the season's PDF once a year. A season therefore
+opens with a manual transcription step, and that is accepted rather than
+designed around — parsing the PDF would automate a job nobody does twice.
 
-**Whether unobserved classes are published at all.** They are real classes
-that really ran, and they carry the richest description in the dataset. But
-off-season the page would be almost entirely history, which is the same
-problem the parked synthetic-data note is about.
+**The sheet is accepted as transcribed, with one exception.** Where it
+disagrees with the site about a time or a room the crawl wins anyway, so
+transcription differences are not worth chasing. Genuine duplication is the
+exception, because the crawl cannot resolve it: a duplicate changes what the
+catalog *is*, not what it says. The duplicated *Design Your Own Board Game*
+row is removed — `id` 16 dropped, `id` 24 kept, because 24 carries the
+`Location` / `Room` split the other seven Heinz Center rows use. Which of the
+two matched the crawl was not evidence either way: only one listing exists,
+so whichever row is reached first claims it and the other falls through.
+
+**Unobserved classes are published.** They are real classes that really ran,
+they carry the richest description in the dataset, and withholding them would
+discard the only remaining record of a class the site has already dropped.
+They ship with `provenance.status: 'unobserved'` so the page can present them
+as history rather than as something bookable.
+
+## Still open
+
+**Off-season and past-week content.** Publishing unobserved classes means that
+from roughly September to June the page is almost entirely history. That is
+the same problem the parked synthetic-data note describes, and it is left
+there rather than solved here by hiding data.
