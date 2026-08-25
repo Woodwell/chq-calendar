@@ -216,6 +216,73 @@ export function isSessionOver(session: ClassSession, todayKey: string): boolean 
   return session.endDate.slice(0, 10) < todayKey;
 }
 
+/**
+ * Where a class is in its own life, as of the Institution's today.
+ *
+ * The page used to sort on a class's earliest session, which put a class that
+ * finished on Saturday above one starting tomorrow: an early start date says
+ * nothing about whether there is anything left. What a reader wants first is
+ * what has not begun, then what is under way, then history.
+ */
+export type ClassLifecycle = 'upcoming' | 'running' | 'ended';
+
+export function classLifecycle(chqClass: ChqClass, todayKey: string): ClassLifecycle {
+  // No session left to speak of. The catalog may still describe it, but
+  // nothing about it is ahead of us.
+  if (chqClass.sessions.length === 0) return 'ended';
+
+  const starts = chqClass.sessions.map((sn) => sn.startDate.slice(0, 10)).sort();
+  const ends = chqClass.sessions.map((sn) => sn.endDate.slice(0, 10)).sort();
+  if (todayKey < starts[0]) return 'upcoming';
+  if (todayKey > ends[ends.length - 1]) return 'ended';
+  return 'running';
+}
+
+const LIFECYCLE_ORDER: Record<ClassLifecycle, number> = { upcoming: 0, running: 1, ended: 2 };
+
+/**
+ * Not started first, then under way, then over.
+ *
+ * Within each group the tie-break is the one that group is asked about:
+ * what starts soonest, what ends soonest, and — for history — what happened
+ * most recently, which is what someone scrolling back is looking for.
+ */
+export function byLifecycle(todayKey: string) {
+  const firstStart = (c: ChqClass) =>
+    c.sessions.reduce<string | null>((min, sn) => (min === null || sn.startDate < min ? sn.startDate : min), null);
+  const lastEnd = (c: ChqClass) =>
+    c.sessions.reduce<string | null>((max, sn) => (max === null || sn.endDate > max ? sn.endDate : max), null);
+  const lastWeek = (c: ChqClass) => (c.weeks ?? []).reduce((m, w) => (w > m ? w : m), 0);
+
+  return (a: ChqClass, b: ChqClass): number => {
+    const la = classLifecycle(a, todayKey);
+    const lb = classLifecycle(b, todayKey);
+    if (la !== lb) return LIFECYCLE_ORDER[la] - LIFECYCLE_ORDER[lb];
+
+    if (la === 'upcoming') {
+      const sa = firstStart(a) ?? '';
+      const sb = firstStart(b) ?? '';
+      if (sa !== sb) return sa < sb ? -1 : 1;
+    } else if (la === 'running') {
+      const ea = lastEnd(a) ?? '';
+      const eb = lastEnd(b) ?? '';
+      if (ea !== eb) return ea < eb ? -1 : 1;
+    } else {
+      // Most recent history first. Sessions date it exactly where they exist;
+      // otherwise the last week the catalog scheduled is the best we have.
+      const ea = lastEnd(a);
+      const eb = lastEnd(b);
+      if (ea && eb && ea !== eb) return ea < eb ? 1 : -1;
+      if (ea && !eb) return -1;
+      if (!ea && eb) return 1;
+      const wa = lastWeek(a);
+      const wb = lastWeek(b);
+      if (wa !== wb) return wb - wa;
+    }
+    return a.title.localeCompare(b.title);
+  };
+}
+
 /** Sessions that have not finished yet — what "still running" actually means. */
 export function upcomingSessions(chqClass: ChqClass, todayKey: string): ClassSession[] {
   return chqClass.sessions.filter((s) => !isSessionOver(s, todayKey));

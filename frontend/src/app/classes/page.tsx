@@ -15,42 +15,27 @@ import { useClassFilterState } from '@/hooks/useClassFilterState';
 import { useFavorites } from '@/hooks/useFavorites';
 import { getDefaultYear } from '@/lib/constants';
 import { buildInfo, formatBuildTime, isDemoBuild } from '@/lib/demoMode';
-import type { ChqClass, ClassSession, ScheduledWeek } from '@/lib/classTypes';
+import type { ClassSession, ScheduledWeek } from '@/lib/classTypes';
 import {
   activeFilterCount,
   availableDays,
   availableMeetingDays,
   availableCategories,
   availableVenues,
+  byLifecycle,
+  classLifecycle,
   availableWeeks,
   filterClasses,
   hasActiveFilters,
   hasSessionFilters,
-  isSessionOver,
   scheduledMatches,
   sessionMatches,
-  upcomingSessions,
 } from '@/lib/utils/classFilterHelpers';
 import { chqDayKey } from '@/lib/utils/chqTime';
 
 const CATALOG_URL =
   'https://tickets.chq.org/searchclasses.html?subjectParentCat=L2_CC_SUB&weekParentCat=SEAS_WKS';
 
-/** Soonest first, and classes with nothing left this season last. */
-export function bySoonestSession(a: ChqClass, b: ChqClass): number {
-  const first = (c: ChqClass) =>
-    c.sessions.reduce<string | null>(
-      (min, s) => (min === null || s.startDate < min ? s.startDate : min),
-      null,
-    );
-  const aFirst = first(a);
-  const bFirst = first(b);
-  if (aFirst === null && bFirst === null) return a.title.localeCompare(b.title);
-  if (aFirst === null) return 1;
-  if (bFirst === null) return -1;
-  if (aFirst === bFirst) return a.title.localeCompare(b.title);
-  return aFirst < bFirst ? -1 : 1;
-}
 
 /**
  * "12 minutes ago" — spot counts are a snapshot taken on a schedule, not a
@@ -96,7 +81,6 @@ export default function ClassesPage() {
   // listed for a few days after it runs — seven were still showing live spot
   // counts three days on — so the clock decides what is past, not the listing.
   const todayKey = chqDayKey(new Date());
-  const bookable = (c: ChqClass) => upcomingSessions(c, todayKey).length > 0;
   const inScope = classes;
 
   // Drawn from what is in scope, so hiding finished classes also drops the
@@ -105,24 +89,22 @@ export default function ClassesPage() {
   const venues = useMemo(() => availableVenues(inScope), [inScope]);
 
   const visible = useMemo(
-    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
-    [inScope, options, filtering],
+    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(byLifecycle(todayKey)),
+    [inScope, options, filtering, todayKey],
   );
-  // How many of the results have a session still to come. Stated alongside
-  // the total so "516 classes" does not read as "516 you could still join".
-  // Deliberately not "with places left": nine of them are waitlist-only, and
-  // a waitlist is not a place.
-  const bookableVisible = useMemo(() => visible.filter(bookable).length, [visible]);
-
-  const matchingSessions = useMemo(
-    () => visible.reduce(
-      (n, c) => n + (dimming
-        ? c.sessions.filter((sx) => sessionMatches(c.id, sx, options)).length
-        : c.sessions.length),
-      0,
-    ),
-    [visible, options, dimming],
-  );
+  // The two groups worth a number: what has not begun, and what is under
+  // way. "Still running" covered both and so answered neither — a class that
+  // started three weeks ago is not the same offer as one starting Friday.
+  const lifecycleCounts = useMemo(() => {
+    let upcoming = 0;
+    let running = 0;
+    for (const c of visible) {
+      const stage = classLifecycle(c, todayKey);
+      if (stage === 'upcoming') upcoming++;
+      else if (stage === 'running') running++;
+    }
+    return { upcoming, running };
+  }, [visible, todayKey]);
 
   const toggleDescription = (classId: string) => {
     setExpanded((prev) => {
@@ -243,8 +225,11 @@ export default function ClassesPage() {
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 {`${visible.length} ${visible.length === 1 ? 'class' : 'classes'}`}
-                {bookableVisible > 0 && (
-                  <span>{` · ${bookableVisible} still running`}</span>
+                {lifecycleCounts.upcoming > 0 && (
+                  <span>{` · ${lifecycleCounts.upcoming} not started`}</span>
+                )}
+                {lifecycleCounts.running > 0 && (
+                  <span>{` · ${lifecycleCounts.running} under way`}</span>
                 )}
                 {filtering && (
                   <button

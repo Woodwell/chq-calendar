@@ -1,5 +1,6 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
-import ClassesPage, { bySoonestSession, describeAge } from '../page';
+import ClassesPage, { describeAge } from '../page';
+import { byLifecycle } from '@/lib/utils/classFilterHelpers';
 import type { ChqClass } from '@/lib/classTypes';
 
 const useClassData = vi.fn();
@@ -96,17 +97,41 @@ async function showFinishedWeeks() {
   fireEvent.click(await screen.findByRole('button', { name: /Show \d+ finished week/ }));
 }
 
-describe('bySoonestSession', () => {
-  it('puts the soonest session first and the finished classes last', () => {
-    const soon = makeClass({ id: 'a', title: 'A' });
-    const later = makeClass({
-      id: 'b', title: 'B',
-      sessions: [{ ...makeClass().sessions[0], startDate: '2026-08-24 13:00:00' }],
-    });
-    // Sessions vanish once their week passes, so this class has none left.
-    const done = makeClass({ id: 'c', title: 'C', sessions: [] });
+describe('byLifecycle', () => {
+  const TODAY = '2026-08-25';
+  const withSession = (id: string, start: string, end: string, over = {}) => makeClass({
+    id, title: id, ...over,
+    sessions: [{ ...makeClass().sessions[0], startDate: start, endDate: end }],
+  });
 
-    expect([done, later, soon].sort(bySoonestSession).map(c => c.id)).toEqual(['a', 'b', 'c']);
+  it('puts what has not started above what is under way, and history last', () => {
+    const notStarted = withSession('a', '2026-08-28 13:00:00', '2026-08-28 15:00:00');
+    const underWay = withSession('b', '2026-08-24 13:00:00', '2026-08-28 15:00:00');
+    // Ran on Saturday and is over, but the ticket site still lists it. Sorting
+    // on its start date alone used to float it to the very top of the page.
+    const finishedButListed = withSession('c', '2026-08-22 13:00:00', '2026-08-22 15:00:00');
+    const noSessionsLeft = makeClass({ id: 'd', title: 'd', sessions: [] });
+
+    expect([finishedButListed, noSessionsLeft, underWay, notStarted]
+      .sort(byLifecycle(TODAY)).map(c => c.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('orders what has not started by what starts soonest', () => {
+    const later = withSession('later', '2026-08-30 13:00:00', '2026-08-30 15:00:00');
+    const sooner = withSession('sooner', '2026-08-26 13:00:00', '2026-08-26 15:00:00');
+    expect([later, sooner].sort(byLifecycle(TODAY)).map(c => c.id)).toEqual(['sooner', 'later']);
+  });
+
+  it('orders history most recent first', () => {
+    const old = withSession('old', '2026-07-01 13:00:00', '2026-07-05 15:00:00');
+    const recent = withSession('recent', '2026-08-17 13:00:00', '2026-08-21 15:00:00');
+    expect([old, recent].sort(byLifecycle(TODAY)).map(c => c.id)).toEqual(['recent', 'old']);
+  });
+
+  it('dates history by the last week when there are no sessions to date it', () => {
+    const week2 = makeClass({ id: 'w2', title: 'w2', sessions: [], weeks: [2] });
+    const week7 = makeClass({ id: 'w7', title: 'w7', sessions: [], weeks: [7] });
+    expect([week2, week7].sort(byLifecycle(TODAY)).map(c => c.id)).toEqual(['w7', 'w2']);
   });
 });
 
