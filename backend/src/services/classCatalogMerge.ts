@@ -37,7 +37,7 @@ export interface MergeInput {
 export type CrawledClass = Omit<
   ChqClass,
   'catalogId' | 'categories' | 'materials' | 'fee' | 'room' | 'provenance'
-  | 'weeks' | 'scheduledWeeks'
+  | 'weeks' | 'scheduledWeeks' | 'venues'
 >;
 
 export interface MergeSummary {
@@ -53,6 +53,49 @@ export interface MergeSummary {
 export interface MergeResult {
   classes: ChqClass[];
   summary: MergeSummary;
+}
+
+/**
+ * The programme a class belongs to, when the title says so and the catalog
+ * does not.
+ *
+ * Masters Series masterclasses are booked after the catalog goes to print, so
+ * 18 of the 31 have no catalog row and would otherwise carry no category at
+ * all — which leaves the most recognisable thing on the page unfilterable.
+ * This is not a guessed category: the titles name the programme outright.
+ */
+const SERIES_CATEGORY = 'Masters Series';
+
+function seriesCategoryOf(title: string): string[] {
+  return /^\s*masters series\b/i.test(title) ? [SERIES_CATEGORY] : [];
+}
+
+/** Categories from the catalog plus the programme the title names, deduped. */
+function categoriesFor(title: string, fromCatalog: string[]): string[] {
+  const series = seriesCategoryOf(title).filter((c) => !fromCatalog.includes(c));
+  return [...fromCatalog, ...series];
+}
+
+/**
+ * The building a class meets in, without the room.
+ *
+ * The catalog keeps `Location` and `Room` in separate columns; the ticket site
+ * runs them together into "Hultquist Center 201B". Matching against the
+ * venues the catalog names turns the site's string back into a building, so
+ * both sources answer a venue filter with the same words. Longest match wins,
+ * because "Children's School Jessica Trapasso Pavilion" also starts with
+ * "Children's School".
+ */
+export function venueOf(location: string, knownVenues: string[]): string {
+  const trimmed = location.trim();
+  if (!trimmed) return '';
+  let best = '';
+  for (const venue of knownVenues) {
+    if (trimmed.length >= venue.length && trimmed.startsWith(venue) && venue.length > best.length) {
+      best = venue;
+    }
+  }
+  return best || trimmed;
 }
 
 /** Sessions carry "2026-08-26 16:30:00"; the date half is the comparable part. */
@@ -157,7 +200,7 @@ function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: str
     instructor: c.instructor,
     description: c.description,
     summary: c.description,
-    categories: c.categories,
+    categories: categoriesFor(c.title, c.categories),
     ageRange: c.ageRange,
     ageRangeText: ageRangeText(c),
     materials: c.materials,
@@ -167,6 +210,7 @@ function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: str
     room: c.room,
     weeks: c.weeks,
     scheduledWeeks: scheduledWeeksOf(c),
+    venues: c.location ? [c.location] : [],
     weeksLabel: weeksLabel(c.weeks),
     daysLabel: c.daysOfWeek.map((d) => DAY_ABBR[d] ?? d).join(', '),
     sessionCount: c.weeks.length || null,
@@ -177,6 +221,30 @@ function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: str
     provenance: { catalog: true, lastObserved, status },
     timezone: 'America/New_York',
   };
+}
+
+/**
+ * Every building a class meets in.
+ *
+ * The catalog's own name first, then each session's location reduced to a
+ * building. The listing row is a last resort only: it is the one place 20
+ * classes have any location at all — no catalog row, no sessions left — but
+ * it carries a room rather than a building, so using it alongside a known
+ * venue would list the same place twice under two names.
+ */
+export function venuesFor(
+  crawled: CrawledClass,
+  cat: CatalogClass | undefined,
+  knownVenues: string[],
+): string[] {
+  const known = [
+    ...(cat?.location ? [cat.location] : []),
+    ...crawled.sessions.map((sn) => venueOf(sn.location, knownVenues)),
+  ].filter(Boolean);
+  if (known.length > 0) return [...new Set(known)].sort();
+
+  const fallback = crawled.location ? venueOf(crawled.location, knownVenues) : '';
+  return fallback ? [fallback] : [];
 }
 
 export function mergeCatalog(input: MergeInput): MergeResult {
@@ -190,6 +258,10 @@ export function mergeCatalog(input: MergeInput): MergeResult {
   }));
 
   const rec = reconcileCatalog(catalogEntries, listedEntries);
+
+  // Longest first, so `venueOf` prefers the most specific building.
+  const knownVenues = [...new Set(catalog.map((c) => c.location).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
 
   const catalogById = new Map(catalog.map((c) => [c.id, c]));
   // One catalog row can legitimately back several listings — the site splits
@@ -215,7 +287,7 @@ export function mergeCatalog(input: MergeInput): MergeResult {
     return {
       ...c,
       catalogId: cat?.id ?? null,
-      categories: cat?.categories ?? [],
+      categories: categoriesFor(c.title, cat?.categories ?? []),
       materials: cat?.materials ?? null,
       fee: cat?.fee ?? null,
       room: cat?.room ?? null,
@@ -236,6 +308,10 @@ export function mergeCatalog(input: MergeInput): MergeResult {
       // dropped. The card falls back to these so a past week still reads as
       // a week rather than as whatever session happens to be left.
       scheduledWeeks: cat ? scheduledWeeksOf(cat) : [],
+      // The catalog's own building where it has one, else the site's string
+      // reduced to a building. Sessions can move between weeks, so this is
+      // every venue the class uses rather than one.
+      venues: venuesFor(c, cat, knownVenues),
       provenance: { catalog: Boolean(cat), lastObserved: crawlDate, status: 'listed' as const },
     };
   });

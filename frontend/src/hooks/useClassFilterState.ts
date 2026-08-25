@@ -15,6 +15,8 @@ const STORAGE_KEY = 'chq-classes-user-state';
 export interface ClassFilterState {
   searchTerm: string;
   selectedCategories: string[];
+  /** Buildings, not rooms. Any-of, like categories. */
+  selectedVenues: string[];
   availability: AvailabilityFilter;
   selectedWeeks: number[];
   selectedDays: string[];
@@ -26,6 +28,7 @@ export interface ClassFilterState {
 const EMPTY: ClassFilterState = {
   searchTerm: '',
   selectedCategories: [],
+  selectedVenues: [],
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
@@ -48,6 +51,7 @@ function load(): ClassFilterState {
     return {
       searchTerm: typeof parsed.searchTerm === 'string' ? parsed.searchTerm : '',
       selectedCategories: Array.isArray(parsed.selectedCategories) ? parsed.selectedCategories : [],
+      selectedVenues: Array.isArray(parsed.selectedVenues) ? parsed.selectedVenues : [],
       availability: parsed.availability ?? EMPTY.availability,
       selectedWeeks: Array.isArray(parsed.selectedWeeks) ? parsed.selectedWeeks : [],
       selectedDays: Array.isArray(parsed.selectedDays) ? parsed.selectedDays : [],
@@ -94,6 +98,10 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, selectedCategories: toggle(f.selectedCategories, category) }));
   }, []);
 
+  const toggleVenue = useCallback((venue: string) => {
+    setFilters((f) => ({ ...f, selectedVenues: toggle(f.selectedVenues, venue) }));
+  }, []);
+
   const toggleWeek = useCallback((week: number) => {
     setFilters((f) => ({ ...f, selectedWeeks: toggle(f.selectedWeeks, week) }));
   }, []);
@@ -118,6 +126,7 @@ export function useClassFilterState() {
     setAvailability,
     setTimeOfDay,
     toggleCategory,
+    toggleVenue,
     toggleWeek,
     toggleDay,
     toggleMeetingDays,

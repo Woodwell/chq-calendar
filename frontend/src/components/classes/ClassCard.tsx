@@ -1,4 +1,5 @@
 import type { ChqClass, ClassProvenance, ClassSession, ScheduledWeek } from '@/lib/classTypes';
+import { useState } from 'react';
 import { classWeekKey } from '@/lib/classTypes';
 import { isSessionOver } from '@/lib/utils/classFilterHelpers';
 
@@ -160,6 +161,22 @@ function SessionRow({ session, classId, registerUrl, isOver, isFavorite, onToggl
   );
 }
 
+/**
+ * The price, without the ticket site's "Sessions:" prefix.
+ *
+ * The site labels every price "Sessions: $145.00", which next to the class's
+ * own session rows reads as a count rather than a price. The catalog's plain
+ * "$145" is preferred where there is one; otherwise the prefix is dropped and
+ * a trailing ".00" with it, since no fee in the catalog has cents.
+ */
+export function priceText(chqClass: ChqClass): string {
+  if (chqClass.fee) return chqClass.fee;
+  return (chqClass.priceLabel || '')
+    .replace(/^\s*sessions?\s*:\s*/i, '')
+    .replace(/\.00\b/g, '')
+    .trim();
+}
+
 /** One line on the card: a live session where there is one, else the plan. */
 type ScheduleRow =
   | { session: ClassSession; scheduled?: undefined }
@@ -177,7 +194,9 @@ type ScheduleRow =
 export function scheduleRows(chqClass: ChqClass, selectedWeeks: number[] = []): ScheduleRow[] {
   const bySession = new Map(chqClass.sessions.map((s) => [s.week, s]));
   const scheduled = new Map((chqClass.scheduledWeeks ?? []).map((w) => [w.week, w]));
-  const weeks = [...new Set([...bySession.keys(), ...scheduled.keys()])].sort((a, b) => a - b);
+  // Newest first: what is still to come is what someone can act on, and by
+  // late August the weeks already gone outnumber it eight to one.
+  const weeks = [...new Set([...bySession.keys(), ...scheduled.keys()])].sort((a, b) => b - a);
 
   // Filtering to a week is a question about that week. A class running all
   // nine would otherwise answer with seven rows nobody asked about, so the
@@ -260,11 +279,27 @@ function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
   );
 }
 
+/** Whether a row is finished: no session left, or one that has already run. */
+export function isRowPast(row: ScheduleRow, todayKey?: string): boolean {
+  if (!row.session) return true;
+  return todayKey ? isSessionOver(row.session, todayKey) : false;
+}
+
 export function ClassCard({
   chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite,
   sessionMatches, scheduledMatches, selectedWeeks = [], todayKey,
 }: ClassCardProps) {
   const rows = scheduleRows(chqClass, selectedWeeks);
+  const [showPast, setShowPast] = useState(false);
+
+  // Finished weeks are folded away, except any that is starred — a star is
+  // someone saying they want to keep seeing it, and hiding it behind a
+  // disclosure would make their own mark invisible.
+  const isStarred = (row: ScheduleRow) => isFavorite(
+    classWeekKey(chqClass.id, row.session ? row.session.week : row.scheduled.week),
+  );
+  const past = rows.filter((r) => isRowPast(r, todayKey) && !isStarred(r));
+  const kept = rows.filter((r) => !past.includes(r));
 
   return (
     <article className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-5">
@@ -285,7 +320,7 @@ export function ClassCard({
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
             {chqClass.instructor && <>{chqClass.instructor} · </>}
             {chqClass.ageRangeText}
-            {chqClass.priceLabel && <> · {chqClass.priceLabel}</>}
+            {priceText(chqClass) && <> · {priceText(chqClass)}</>}
           </p>
           {chqClass.categories.length > 0 && (
             <p className="mt-1 flex flex-wrap gap-1">
@@ -326,7 +361,7 @@ export function ClassCard({
           </p>
         ) : (
           <ul>
-            {rows.map((row) => (row.session ? (
+            {(showPast ? rows : kept).map((row) => (row.session ? (
               <SessionRow
                 key={row.session.performanceId}
                 session={row.session}
@@ -348,6 +383,19 @@ export function ClassCard({
               />
             )))}
           </ul>
+        )}
+
+        {past.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowPast((v) => !v)}
+            aria-expanded={showPast}
+            className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {showPast
+              ? 'Hide finished weeks'
+              : `Show ${past.length} finished ${past.length === 1 ? 'week' : 'weeks'}`}
+          </button>
         )}
       </div>
     </article>

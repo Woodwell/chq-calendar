@@ -21,6 +21,7 @@ import {
   availableDays,
   availableMeetingDays,
   availableCategories,
+  availableVenues,
   availableWeeks,
   filterClasses,
   hasActiveFilters,
@@ -101,6 +102,7 @@ export default function ClassesPage() {
   // Drawn from what is in scope, so hiding finished classes also drops the
   // categories only they had.
   const categories = useMemo(() => availableCategories(inScope), [inScope]);
+  const venues = useMemo(() => availableVenues(inScope), [inScope]);
 
   const visible = useMemo(
     () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
@@ -221,6 +223,7 @@ export default function ClassesPage() {
             <ClassFilters
               filters={filterState.filters}
               categories={categories}
+              venues={venues}
               weeks={weeks}
               days={days}
               meetingDayOptions={meetingDayOptions}
@@ -230,6 +233,7 @@ export default function ClassesPage() {
               onSetAvailability={filterState.setAvailability}
               onSetTimeOfDay={filterState.setTimeOfDay}
               onToggleCategory={filterState.toggleCategory}
+              onToggleVenue={filterState.toggleVenue}
               onToggleWeek={filterState.toggleWeek}
               onToggleDay={filterState.toggleDay}
               onToggleMeetingDays={filterState.toggleMeetingDays}

@@ -44,6 +44,53 @@ function Toggle({ label, active, onClick, title, name }: ToggleProps) {
   );
 }
 
+/**
+ * A group whose options are too many to show at once.
+ *
+ * Category runs to seventeen and venue to forty-four, which buries the rest
+ * of the panel. Whatever is selected always stays visible — a filter you
+ * cannot see is a filter you cannot undo — and the rest sit behind a count.
+ */
+const COLLAPSE_ABOVE = 8;
+
+function CollapsibleGroup({ label, options, onToggle }: {
+  label: string;
+  options: Array<{ value: string; active: boolean }>;
+  onToggle: (value: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const selected = options.filter((o) => o.active);
+  // A short list is cheaper to read than to unfold, so only the long ones
+  // collapse. Venue runs to forty-four, category to seventeen; time of day is
+  // three and would be silly behind a button.
+  const collapses = options.length > COLLAPSE_ABOVE;
+  const shown = !collapses || expanded ? options : selected;
+  const hidden = options.length - shown.length;
+
+  return (
+    <Group label={label}>
+      {shown.map((o) => (
+        <Toggle
+          key={o.value}
+          label={o.value}
+          active={o.active}
+          onClick={() => onToggle(o.value)}
+        />
+      ))}
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          className="px-2 py-1 rounded-full text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          {expanded ? 'Show less' : `Show all ${options.length}`}
+        </button>
+      )}
+    </Group>
+  );
+}
+
 function Group({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -71,6 +118,7 @@ const TIMES: { value: TimeOfDay; label: string }[] = [
 interface ClassFiltersProps {
   filters: ClassFilterState;
   categories: string[];
+  venues: string[];
   weeks: number[];
   days: string[];
   meetingDayOptions: number[];
@@ -80,6 +128,7 @@ interface ClassFiltersProps {
   onSetAvailability: (value: AvailabilityFilter) => void;
   onSetTimeOfDay: (value: TimeOfDay) => void;
   onToggleCategory: (category: string) => void;
+  onToggleVenue: (venue: string) => void;
   onToggleWeek: (week: number) => void;
   onToggleDay: (day: string) => void;
   onToggleMeetingDays: (days: number) => void;
@@ -87,9 +136,9 @@ interface ClassFiltersProps {
 }
 
 export function ClassFilters({
-  filters, categories, weeks, days, meetingDayOptions, favoriteCount, activeCount,
+  filters, categories, venues, weeks, days, meetingDayOptions, favoriteCount, activeCount,
   onSetSearchTerm,
-  onSetAvailability, onSetTimeOfDay, onToggleCategory, onToggleWeek, onToggleDay,
+  onSetAvailability, onSetTimeOfDay, onToggleCategory, onToggleVenue, onToggleWeek, onToggleDay,
   onToggleMeetingDays, onToggleFavoritesOnly,
 }: ClassFiltersProps) {
   // Open on a wide screen, closed on a phone. Expanded, the pickers run to
@@ -147,16 +196,25 @@ export function ClassFilters({
       </Group>
 
       {categories.length > 0 && (
-        <Group label="Category">
-          {categories.map((category) => (
-            <Toggle
-              key={category}
-              label={category}
-              active={filters.selectedCategories.includes(category)}
-              onClick={() => onToggleCategory(category)}
-            />
-          ))}
-        </Group>
+        <CollapsibleGroup
+          label="Category"
+          options={categories.map((category) => ({
+            value: category,
+            active: filters.selectedCategories.includes(category),
+          }))}
+          onToggle={onToggleCategory}
+        />
+      )}
+
+      {venues.length > 0 && (
+        <CollapsibleGroup
+          label="Venue"
+          options={venues.map((venue) => ({
+            value: venue,
+            active: filters.selectedVenues.includes(venue),
+          }))}
+          onToggle={onToggleVenue}
+        />
       )}
 
       {/* Weeks come from the printed schedule, so all nine stay selectable
@@ -196,7 +254,7 @@ export function ClassFilters({
       {/* How many days a week, as against which days — "only want a one-off"
           rather than "free on Tuesdays". */}
       {meetingDayOptions.length > 0 && (
-        <Group label="Meets">
+        <Group label="Classes/wk">
           {meetingDayOptions.map((n) => (
             <Toggle
               key={n}

@@ -117,6 +117,11 @@ export interface ChqClass {
   weeks: number[];
   /** The catalog's intended schedule, one entry per week in `weeks`. */
   scheduledWeeks: ScheduledWeek[];
+  /**
+   * Every building the class meets in, without room numbers — so a venue
+   * filter offers 44 places rather than a few hundred rooms.
+   */
+  venues: string[];
   provenance: ClassProvenance;
   description: string;
   sessions: ClassSession[];

@@ -178,6 +178,14 @@ export interface ChqClass extends ClassSearchRow, ClassDetail {
    * a class the catalog never printed, whose only schedule is its sessions.
    */
   scheduledWeeks: ScheduledWeek[];
+  /**
+   * Every building the class meets in, without room numbers.
+   *
+   * The catalog keeps location and room apart; the ticket site runs them
+   * together. Normalising both to the catalog's building names is what lets a
+   * venue filter offer 44 places rather than a few hundred rooms.
+   */
+  venues: string[];
   provenance: ClassProvenance;
   timezone: 'America/New_York';
 }

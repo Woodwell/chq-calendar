@@ -22,6 +22,7 @@ const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   catalogId: null,
   weeks: [8],
   scheduledWeeks: [],
+  venues: [],
   materials: null,
   fee: null,
   room: null,
@@ -88,6 +89,11 @@ afterEach(() => {
  */
 async function openFilters() {
   fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }));
+}
+
+/** Finished weeks fold away on a card; this opens the first card's fold. */
+async function showFinishedWeeks() {
+  fireEvent.click(await screen.findByRole('button', { name: /Show \d+ finished week/ }));
 }
 
 describe('bySoonestSession', () => {
@@ -194,6 +200,8 @@ describe('ClassesPage', () => {
     // Shown by default now. The season's history is the point of the page
     // off-season, and Spots is the control for narrowing to what is joinable.
     expect(await screen.findByText('Finished Class')).toBeInTheDocument();
+    // Every week of it is finished, so its rows start folded away.
+    await showFinishedWeeks();
     // The ticket site dropped the week 2 session, so the card falls back to
     // the schedule the catalog printed rather than going blank.
     expect(screen.getByText('Week 2')).toBeInTheDocument();
@@ -219,6 +227,7 @@ describe('ClassesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Week 2' }));
 
+    await showFinishedWeeks();
     await waitFor(() => expect(screen.getByText('Week 2')).toBeInTheDocument());
     // Weeks 3 and 4 are finished and were not asked about.
     expect(screen.queryByText('Week 3')).not.toBeInTheDocument();
@@ -242,12 +251,55 @@ describe('ClassesPage', () => {
     })]));
     render(<ClassesPage />);
 
+    await showFinishedWeeks();
     fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
 
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem('chq-calendar-favorites') ?? '{}');
       expect(stored.eventIds).toEqual(['class:CHQ.EVN1908:week8']);
     });
+  });
+
+  it('keeps a starred week out of the fold', async () => {
+    // Folding away a week someone has starred would hide their own mark.
+    localStorage.setItem('chq-calendar-favorites', JSON.stringify({
+      eventIds: ['class:CHQ.EVN9:week2'], lastSaved: Date.now(),
+    }));
+    useClassData.mockReturnValue(loaded([makeClass({
+      id: 'CHQ.EVN9', title: 'Finished Class', sessions: [], weeks: [2, 3],
+      scheduledWeeks: [2, 3].map((week) => ({
+        week, daysOfWeek: ['Monday'], startTime: '9:00 AM', endTime: '10:15 AM',
+        location: 'Hultquist', room: '101',
+      })),
+    })]));
+    render(<ClassesPage />);
+
+    // Week 2 is starred, so it shows; week 3 is folded.
+    expect(await screen.findByText('Week 2')).toBeInTheDocument();
+    expect(screen.queryByText('Week 3')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Show 1 finished week/ })).toBeInTheDocument();
+  });
+
+  it('shows the price without the ticket site\'s "Sessions:" prefix', async () => {
+    useClassData.mockReturnValue(loaded([makeClass({
+      fee: null, priceLabel: 'Sessions: $145.00',
+    })]));
+    render(<ClassesPage />);
+    expect(await screen.findByText(/\$145/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sessions: \$145/)).not.toBeInTheDocument();
+  });
+
+  it('filters by venue', async () => {
+    useClassData.mockReturnValue(loaded([
+      makeClass({ title: 'At Hultquist', venues: ['Hultquist Center'] }),
+      makeClass({ id: 'CHQ.EVN2', title: 'At Turner', venues: ['Turner Community Center'] }),
+    ]));
+    render(<ClassesPage />);
+    await openFilters();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hultquist Center' }));
+    await waitFor(() => expect(screen.queryByText('At Turner')).not.toBeInTheDocument());
+    expect(screen.getByText('At Hultquist')).toBeInTheDocument();
   });
 
   it('narrows to what can still be joined through the Spots picker', async () => {

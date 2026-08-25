@@ -161,6 +161,81 @@ describe('mergeCatalog', () => {
     expect(gone.categories).toEqual(['Art']);
   });
 
+  it('names the Masters Series from the title when the catalog cannot', () => {
+    // These are booked after the catalog prints, so 18 of the 31 have no
+    // catalog row. Without this the most recognisable strand on the page
+    // carries no category at all.
+    const { classes } = mergeCatalog({
+      catalog: [],
+      listed: [crawled({ title: 'Masters Series Masterclass: Someone Famous' })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].categories).toEqual(['Masters Series']);
+  });
+
+  it('adds the series alongside the catalog categories, not instead of them', () => {
+    const { classes } = mergeCatalog({
+      catalog: [catalogClass({ title: 'Masters Series Culinary Masterclass', categories: ['Culinary'] })],
+      listed: [crawled({ title: 'Masters Series Culinary Masterclass' })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].categories).toEqual(['Culinary', 'Masters Series']);
+  });
+
+  it('reduces the site\'s room string to the catalog\'s building', () => {
+    const { classes } = mergeCatalog({
+      catalog: [catalogClass({ location: 'Hultquist Center', room: '201B' })],
+      listed: [crawled({ sessions: [{ ...session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'), location: 'Hultquist Center 201B' }] })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].venues).toEqual(['Hultquist Center']);
+  });
+
+  it('falls back to the listing row only when nothing better exists', () => {
+    // No catalog row and no sessions left: the listing's location is all
+    // there is, even though it names a room rather than a building.
+    const { classes } = mergeCatalog({
+      catalog: [],
+      listed: [crawled({ sessions: [], location: 'Norton Hall' })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].venues).toEqual(['Norton Hall']);
+  });
+
+  it('ignores the listing row once a session says where the class meets', () => {
+    // The listing row carries a room-level string that often will not reduce
+    // to a known building. Consulting it alongside a session would offer the
+    // same place twice under two names.
+    const { classes } = mergeCatalog({
+      catalog: [],
+      listed: [crawled({
+        location: 'Hultquist 101 (room B)',
+        sessions: [{ ...session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'), location: 'Norton Hall' }],
+      })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].venues).toEqual(['Norton Hall']);
+  });
+
+  it('prefers the longer venue when one name prefixes another', () => {
+    // "Children's School Jessica Trapasso Pavilion" also starts with
+    // "Children's School", and the pavilion is the more useful answer.
+    const catalog = [
+      catalogClass({ id: '1', title: 'A', location: "Children's School" }),
+      catalogClass({ id: '2', title: 'B', location: "Children's School Jessica Trapasso Pavilion" }),
+    ];
+    const { classes } = mergeCatalog({
+      catalog,
+      listed: [crawled({
+        title: 'C', instructor: 'Nobody At All',
+        sessions: [{ ...session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'), location: "Children's School Jessica Trapasso Pavilion" }],
+      })],
+      crawlDate: CRAWL_DATE,
+    });
+    const listedOnly = classes.find((c) => c.title === 'C')!;
+    expect(listedOnly.venues).toEqual(["Children's School Jessica Trapasso Pavilion"]);
+  });
+
   it('keeps the weeks the site has forgotten, so history stays filterable', () => {
     // The catalog schedules weeks 3 and 9; the site has dropped week 3 now
     // that it is over and lists only the week 9 session. Both must survive,

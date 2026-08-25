@@ -9,6 +9,8 @@ export interface ClassFilterOptions {
   searchTerm: string;
   /** Category names; empty means "any". A class matches if it has any of them. */
   selectedCategories: string[];
+  /** Buildings; a class matches if it uses any of them. */
+  selectedVenues: string[];
   availability: AvailabilityFilter;
   /** Empty means "any week". */
   selectedWeeks: number[];
@@ -29,6 +31,7 @@ export interface ClassFilterOptions {
 export const EMPTY_CLASS_FILTERS: ClassFilterOptions = {
   searchTerm: '',
   selectedCategories: [],
+  selectedVenues: [],
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
@@ -249,6 +252,7 @@ export function matchesSearch(chqClass: ChqClass, term: string): boolean {
 export function filterClasses(classes: ChqClass[], options: ClassFilterOptions): ChqClass[] {
   const term = options.searchTerm.trim();
   const categories = options.selectedCategories;
+  const venues = options.selectedVenues;
   // Only require a matching session when a session-level filter is actually
   // set. A class whose sessions have all passed has none to match, so an
   // unconditional `.some()` would drop every finished class the moment
@@ -259,6 +263,9 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
     // Category is a property of the class, not of a session, so it joins the
     // search rather than the per-session conjunction.
     if (categories.length > 0 && !c.categories.some((k) => categories.includes(k))) return false;
+    // Venue is a property of the class too — a class that moves rooms between
+    // weeks still meets in the buildings it meets in.
+    if (venues.length > 0 && !(c.venues ?? []).some((v) => venues.includes(v))) return false;
     if (!bySession) return true;
 
     // With sessions, the conjunction is resolved per session as before, which
@@ -291,6 +298,7 @@ export function hasActiveFilters(options: ClassFilterOptions): boolean {
   return (
     options.searchTerm.trim().length > 0 ||
     options.selectedCategories.length > 0 ||
+    options.selectedVenues.length > 0 ||
     hasSessionFilters(options)
   );
 }
@@ -300,6 +308,7 @@ export function activeFilterCount(options: ClassFilterOptions): number {
   return (
     (options.searchTerm.trim() ? 1 : 0) +
     options.selectedCategories.length +
+    options.selectedVenues.length +
     (options.availability === 'all' ? 0 : 1) +
     options.selectedWeeks.length +
     options.selectedDays.length +
@@ -324,6 +333,17 @@ export function availableWeeks(classes: ChqClass[]): number[] {
     for (const s of c.sessions) weeks.add(s.week);
   }
   return [...weeks].sort((a, b) => a - b);
+}
+
+/** Venues in use, commonest first, then alphabetical. */
+export function availableVenues(classes: ChqClass[]): string[] {
+  const counts = new Map<string, number>();
+  for (const c of classes) {
+    for (const v of c.venues ?? []) counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
+    .map(([name]) => name);
 }
 
 /** Categories present in the catalog, commonest first, then alphabetical. */

@@ -37,6 +37,7 @@ const chqClass = (id: string, sessions: ClassSession[]): ChqClass => ({
   catalogId: null,
   weeks: [8],
   scheduledWeeks: [],
+  venues: [],
   materials: null,
   fee: null,
   room: null,
