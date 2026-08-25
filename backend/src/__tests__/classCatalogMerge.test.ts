@@ -1,5 +1,5 @@
 import {
-  mergeCatalog, statusForAbsent, weekEndDates, type CrawledClass,
+  fillSeasonWeeks, mergeCatalog, statusForAbsent, weekEndDates, type CrawledClass,
 } from '../services/classCatalogMerge';
 import type { CatalogClass } from '../services/classCatalog';
 
@@ -246,6 +246,66 @@ describe('mergeCatalog', () => {
       crawlDate: CRAWL_DATE,
     });
     expect(classes[0].weeks).toEqual([3, 9]);
+  });
+
+  it('dates each printed week from the crawl, so past and future can be told apart', () => {
+    const { classes } = mergeCatalog({
+      catalog: [catalogClass({ weeks: [8, 9] })],
+      listed: [crawled({ sessions: [
+        session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'),
+        session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00'),
+      ] })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].scheduledWeeks.map((w) => [w.week, w.weekStart, w.weekEnd])).toEqual([
+      [8, '2026-08-17', '2026-08-21'],
+      [9, '2026-08-24', '2026-08-28'],
+    ]);
+  });
+
+  it('counts the rest of the season off the one week the crawl could date', () => {
+    // By late August the site has dropped every session but week 9's, so a
+    // single week is observed and the other eight would go unlabelled. The
+    // season is nine consecutive weeks, so they follow at seven days each.
+    // Cross-checked against the events feed, which independently puts week 2
+    // at 4 July, week 3 at 11 July and week 9 at 22 August.
+    const filled = fillSeasonWeeks(new Map([[9, { start: '2026-08-22', end: '2026-08-28' }]]));
+    expect(filled.get(8)).toEqual({ start: '2026-08-15', end: '2026-08-21' });
+    expect(filled.get(3)).toEqual({ start: '2026-07-11', end: '2026-07-17' });
+    expect(filled.get(1)).toEqual({ start: '2026-06-27', end: '2026-07-03' });
+    // The observed week is left exactly as observed.
+    expect(filled.get(9)).toEqual({ start: '2026-08-22', end: '2026-08-28' });
+  });
+
+  it('invents no calendar when nothing at all was observed', () => {
+    // Off-season. A season placed from no evidence would be a guess wearing
+    // a date's clothes.
+    expect(fillSeasonWeeks(new Map()).size).toBe(0);
+  });
+
+  it('leaves every week undated when the crawl saw no session at all', () => {
+    // Off-season, and a card must not then claim any week is over.
+    const { classes } = mergeCatalog({
+      catalog: [catalogClass({ weeks: [3] })],
+      listed: [],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].scheduledWeeks[0]).toMatchObject({ weekStart: null, weekEnd: null });
+  });
+
+  it('dates a week by its widest span across every class in it', () => {
+    const { classes } = mergeCatalog({
+      catalog: [catalogClass({ weeks: [9] })],
+      listed: [
+        crawled({ sessions: [session(9, '2026-08-26 09:00:00', '2026-08-26 10:00:00')] }),
+        crawled({ id: 'CHQ.EVN2', title: 'Other', instructor: 'Nobody At All',
+          sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] }),
+      ],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].scheduledWeeks[0]).toMatchObject({
+      weekStart: '2026-08-24', weekEnd: '2026-08-28',
+    });
   });
 
   it('falls back to the crawl for a class the catalog never printed', () => {

@@ -1,7 +1,8 @@
-import type { ChqClass, ClassProvenance, ClassSession, ScheduledWeek } from '@/lib/classTypes';
+import type { ChqClass, ClassProvenance, ClassSession, ClassStatus, ScheduledWeek } from '@/lib/classTypes';
 import { useState } from 'react';
 import { classWeekKey } from '@/lib/classTypes';
-import { isSessionOver } from '@/lib/utils/classFilterHelpers';
+import { isSessionOver, scheduledWeekState } from '@/lib/utils/classFilterHelpers';
+import type { ScheduledWeekState } from '@/lib/utils/classFilterHelpers';
 
 /**
  * How a session's availability reads. Spot counts come straight from the
@@ -59,17 +60,37 @@ function FavoriteStar({ week, isFavorite, onToggle }: {
  *
  * Shown from the printed catalog so that filtering to a week already past
  * still produces a card that talks about that week. It offers no spot count
- * and no register link, because neither means anything once the week is over
- * — but it can still be starred, since the star is keyed on the week rather
+ * and no register link, because the crawl has no session to draw them from —
+ * but it can still be starred, since the star is keyed on the week rather
  * than on a session id the catalog never had.
  */
-function ScheduledRow({ scheduled, classId, isFavorite, onToggleFavorite, matches }: {
+const SCHEDULED_BADGE: Record<ScheduledWeekState, { text: string; title: string; className: string }> = {
+  over: {
+    text: 'Over',
+    title: 'This week has been and gone',
+    className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  },
+  cancelled: {
+    text: 'Cancelled',
+    title: 'The printed catalog scheduled this week; the ticket site no longer lists the class',
+    className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
+  },
+  unlisted: {
+    text: 'Not listed',
+    title: 'From the printed catalog. The ticket site is not offering a session to book in this week',
+    className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  },
+};
+
+function ScheduledRow({ scheduled, state, classId, isFavorite, onToggleFavorite, matches }: {
   scheduled: ScheduledWeek;
+  state: ScheduledWeekState;
   classId: string;
   isFavorite: boolean;
   onToggleFavorite: (key: string) => void;
   matches: boolean;
 }) {
+  const badge = SCHEDULED_BADGE[state];
   const place = [scheduled.location, scheduled.room].filter(Boolean).join(' ');
   const time = scheduled.startTime && scheduled.endTime
     ? `${scheduled.startTime} - ${scheduled.endTime}`
@@ -96,8 +117,11 @@ function ScheduledRow({ scheduled, classId, isFavorite, onToggleFavorite, matche
         </div>
       </div>
 
-      <span className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-        Over
+      <span
+        title={badge.title}
+        className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${badge.className}`}
+      >
+        {badge.text}
       </span>
     </li>
   );
@@ -279,10 +303,22 @@ function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
   );
 }
 
-/** Whether a row is finished: no session left, or one that has already run. */
-export function isRowPast(row: ScheduleRow, nowLocal?: string): boolean {
-  if (!row.session) return true;
-  return nowLocal ? isSessionOver(row.session, nowLocal) : false;
+/**
+ * Whether a row belongs in the fold.
+ *
+ * Only weeks that have actually been and gone. A printed week still ahead is
+ * not finished — the site is simply offering nothing to book in it — and a
+ * cancelled class has nothing but printed weeks, so folding those would leave
+ * an empty card behind a disclosure.
+ */
+export function isRowFinished(
+  row: ScheduleRow,
+  status: ClassStatus,
+  nowLocal?: string,
+): boolean {
+  if (row.session) return nowLocal ? isSessionOver(row.session, nowLocal) : false;
+  if (!nowLocal) return false;
+  return scheduledWeekState(row.scheduled, status, nowLocal) === 'over';
 }
 
 export function ClassCard({
@@ -298,7 +334,9 @@ export function ClassCard({
   const isStarred = (row: ScheduleRow) => isFavorite(
     classWeekKey(chqClass.id, row.session ? row.session.week : row.scheduled.week),
   );
-  const past = rows.filter((r) => isRowPast(r, nowLocal) && !isStarred(r));
+  const past = rows.filter(
+    (r) => isRowFinished(r, chqClass.provenance.status, nowLocal) && !isStarred(r),
+  );
   const kept = rows.filter((r) => !past.includes(r));
 
   return (
@@ -376,6 +414,7 @@ export function ClassCard({
               <ScheduledRow
                 key={`week-${row.scheduled.week}`}
                 scheduled={row.scheduled}
+                state={scheduledWeekState(row.scheduled, chqClass.provenance.status, nowLocal ?? '')}
                 classId={chqClass.id}
                 isFavorite={isFavorite(classWeekKey(chqClass.id, row.scheduled.week))}
                 onToggleFavorite={onToggleFavorite}

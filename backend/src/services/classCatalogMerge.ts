@@ -101,23 +101,81 @@ export function venueOf(location: string, knownVenues: string[]): string {
 /** Sessions carry "2026-08-26 16:30:00"; the date half is the comparable part. */
 const dateKey = (naiveLocal: string): string => naiveLocal.slice(0, 10);
 
+/** The span of a season week, as the crawl's own sessions reveal it. */
+export interface WeekRange {
+  start: string;
+  end: string;
+}
+
 /**
- * When each season week ends, learned from the sessions the crawl saw.
+ * When each season week runs, learned from the sessions the crawl saw.
  *
  * The catalog says a class runs in week 4 but never says what week 4's dates
  * are; the site prints dates but not a season calendar. Reading the mapping
- * off the crawl is what lets the two be compared at all.
+ * off the crawl is what lets the two be compared at all — and it is the only
+ * way to tell a printed week already past from one still to come.
  */
-export function weekEndDates(listed: CrawledClass[]): Map<number, string> {
-  const ends = new Map<number, string>();
+export function weekDateRanges(listed: CrawledClass[]): Map<number, WeekRange> {
+  const ranges = new Map<number, WeekRange>();
   for (const c of listed) {
     for (const s of c.sessions) {
+      const start = dateKey(s.startDate);
       const end = dateKey(s.endDate);
-      const known = ends.get(s.week);
-      if (!known || end > known) ends.set(s.week, end);
+      const known = ranges.get(s.week);
+      if (!known) {
+        ranges.set(s.week, { start, end });
+        continue;
+      }
+      // Widest span wins: a week runs from its earliest session to its last.
+      if (start < known.start) known.start = start;
+      if (end > known.end) known.end = end;
     }
   }
-  return ends;
+  return fillSeasonWeeks(ranges);
+}
+
+/** A season week is seven days, so one dated week places all nine. */
+const WEEK_DAYS = 7;
+
+function shiftDate(key: string, days: number): string {
+  const d = new Date(`${key}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Dates the weeks no session could date, by counting from one that could.
+ *
+ * By late August the site has dropped every session but week 9's, so the
+ * crawl dates one week in nine and the other eight would go unlabelled — a
+ * card would say "not listed" about weeks that plainly finished in July.
+ *
+ * The season is nine consecutive weeks, so a week's dates follow from any
+ * other week's by seven days each. This fills only the gaps: a week a session
+ * actually dated keeps what was observed. With nothing observed at all —
+ * off-season — it fills nothing, which is the right answer rather than a
+ * calendar invented from no evidence.
+ */
+export function fillSeasonWeeks(ranges: Map<number, WeekRange>): Map<number, WeekRange> {
+  const anchorWeek = [...ranges.keys()].sort((a, b) => a - b)[0];
+  if (anchorWeek === undefined) return ranges;
+
+  const anchor = ranges.get(anchorWeek)!;
+  const filled = new Map(ranges);
+  for (let week = 1; week <= 9; week++) {
+    if (filled.has(week)) continue;
+    const offset = (week - anchorWeek) * WEEK_DAYS;
+    filled.set(week, {
+      start: shiftDate(anchor.start, offset),
+      end: shiftDate(anchor.end, offset),
+    });
+  }
+  return filled;
+}
+
+/** Just the end of each week, which is what the temporal rule turns on. */
+export function weekEndDates(listed: CrawledClass[]): Map<number, string> {
+  return new Map([...weekDateRanges(listed)].map(([week, r]) => [week, r.end]));
 }
 
 /**
@@ -162,15 +220,23 @@ const DAY_ABBR: Record<string, string> = {
  * every week it runs shares the same shape. Kept as a list anyway, because
  * the reader wants to see week 2 and week 3 as separate rows on the card.
  */
-function scheduledWeeksOf(c: CatalogClass): ScheduledWeek[] {
-  return c.weeks.map((week) => ({
-    week,
-    daysOfWeek: c.daysOfWeek,
-    startTime: c.startTime,
-    endTime: c.endTime,
-    location: c.location,
-    room: c.room,
-  }));
+function scheduledWeeksOf(c: CatalogClass, ranges: Map<number, WeekRange>): ScheduledWeek[] {
+  return c.weeks.map((week) => {
+    const range = ranges.get(week);
+    return {
+      week,
+      daysOfWeek: c.daysOfWeek,
+      startTime: c.startTime,
+      endTime: c.endTime,
+      location: c.location,
+      room: c.room,
+      // Dated from the crawl's own sessions, so a card can tell a week that
+      // has been and gone from one still ahead. Null when no session
+      // anywhere fell in that week and nothing can date it.
+      weekStart: range?.start ?? null,
+      weekEnd: range?.end ?? null,
+    };
+  });
 }
 
 /** Ages rendered the way the site writes them, so both sources read alike. */
@@ -191,7 +257,12 @@ function ageRangeText(c: CatalogClass): string {
  * exactly the evidence this design refuses to manufacture. What it does carry
  * is the catalog's own description of what was planned.
  */
-function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: string | null): ChqClass {
+function fromCatalogOnly(
+  c: CatalogClass,
+  status: ClassStatus,
+  lastObserved: string | null,
+  weekRanges: Map<number, WeekRange>,
+): ChqClass {
   return {
     // Namespaced so it cannot be mistaken for, or collide with, an eventAk.
     id: `catalog:${c.id}`,
@@ -209,7 +280,7 @@ function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: str
     location: c.location,
     room: c.room,
     weeks: c.weeks,
-    scheduledWeeks: scheduledWeeksOf(c),
+    scheduledWeeks: scheduledWeeksOf(c, weekRanges),
     venues: c.location ? [c.location] : [],
     weeksLabel: weeksLabel(c.weeks),
     daysLabel: c.daysOfWeek.map((d) => DAY_ABBR[d] ?? d).join(', '),
@@ -282,6 +353,12 @@ export function mergeCatalog(input: MergeInput): MergeResult {
     if (c.catalogId) priorByCatalogId.set(c.catalogId, c);
   }
 
+  // Declared before the mapping below uses it: the season's week calendar is
+  // read off the crawl once, and both the listed and the catalog-only records
+  // date their printed weeks from it.
+  const weekRanges = weekDateRanges(listed);
+  const weekEnds = new Map([...weekRanges].map(([w, r]) => [w, r.end]));
+
   const classes: ChqClass[] = listed.map((c) => {
     const cat = catalogForListing.get(c.id);
     return {
@@ -307,7 +384,7 @@ export function mergeCatalog(input: MergeInput): MergeResult {
       // The plan for every week, including those the site has already
       // dropped. The card falls back to these so a past week still reads as
       // a week rather than as whatever session happens to be left.
-      scheduledWeeks: cat ? scheduledWeeksOf(cat) : [],
+      scheduledWeeks: cat ? scheduledWeeksOf(cat, weekRanges) : [],
       // The catalog's own building where it has one, else the site's string
       // reduced to a building. Sessions can move between weeks, so this is
       // every venue the class uses rather than one.
@@ -316,14 +393,13 @@ export function mergeCatalog(input: MergeInput): MergeResult {
     };
   });
 
-  const weekEnds = weekEndDates(listed);
   const absent = rec.catalogOnly.map((entry) => {
     const c = catalogById.get(entry.id)!;
     const status = statusForAbsent(c.weeks, weekEnds, crawlDate);
     // A class seen by an earlier run keeps that date: it is a record of when
     // it was last actually observed, not of this run's outcome.
     const prior = priorByCatalogId.get(c.id);
-    return fromCatalogOnly(c, status, prior?.provenance.lastObserved ?? null);
+    return fromCatalogOnly(c, status, prior?.provenance.lastObserved ?? null, weekRanges);
   });
 
   return {

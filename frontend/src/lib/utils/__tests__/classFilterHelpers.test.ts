@@ -112,7 +112,7 @@ describe('filterClasses', () => {
     const printed = (over = {}) => ({
       week: 2, daysOfWeek: ['Monday', 'Wednesday'],
       startTime: '9:00 AM', endTime: '10:15 AM',
-      location: 'Hultquist', room: '101', ...over,
+      location: 'Hultquist', room: '101', weekStart: null, weekEnd: null, ...over,
     });
     const past = (over = {}) => {
       const c = chqClass('past', []);

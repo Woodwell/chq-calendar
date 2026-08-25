@@ -234,6 +234,8 @@ describe('ClassesPage', () => {
         week: 2, daysOfWeek: ['Monday', 'Wednesday'],
         startTime: '9:00 AM', endTime: '10:15 AM',
         location: 'Hultquist', room: '101',
+        // Dated from the crawl, and well behind the pinned NOW.
+        weekStart: '2026-07-06', weekEnd: '2026-07-10',
       }],
     })]));
     render(<ClassesPage />);
@@ -261,6 +263,7 @@ describe('ClassesPage', () => {
       scheduledWeeks: [2, 3, 4].map((week) => ({
         week, daysOfWeek: ['Monday'], startTime: '9:00 AM', endTime: '10:00 AM',
         location: 'Hultquist', room: '101',
+        weekStart: `2026-07-0${week}`, weekEnd: `2026-07-0${week + 3}`,
       })),
     })]));
     render(<ClassesPage />);
@@ -288,11 +291,12 @@ describe('ClassesPage', () => {
       scheduledWeeks: [{
         week: 8, daysOfWeek: ['Thursday'], startTime: '4:00 PM', endTime: '6:00 PM',
         location: 'Athenaeum Hotel', room: '',
+        weekStart: null, weekEnd: null,
       }],
     })]));
     render(<ClassesPage />);
 
-    await showFinishedWeeks();
+    // Undated, so it is not claimed to be finished and shows without unfolding.
     fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
 
     await waitFor(() => {
@@ -311,6 +315,7 @@ describe('ClassesPage', () => {
       scheduledWeeks: [2, 3].map((week) => ({
         week, daysOfWeek: ['Monday'], startTime: '9:00 AM', endTime: '10:15 AM',
         location: 'Hultquist', room: '101',
+        weekStart: `2026-07-0${week}`, weekEnd: `2026-07-0${week + 3}`,
       })),
     })]));
     render(<ClassesPage />);
@@ -376,6 +381,45 @@ describe('ClassesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hultquist Center' }));
     await waitFor(() => expect(screen.queryByText('At Turner')).not.toBeInTheDocument());
     expect(screen.getByText('At Hultquist')).toBeInTheDocument();
+  });
+
+  it('does not call a week still ahead "over"', async () => {
+    // Ten classes are listed all season with nothing bookable — a sailing
+    // course running to week 9 among them. Its later weeks have not happened,
+    // so the site simply is not offering a session in them.
+    useClassData.mockReturnValue(loaded([makeClass({
+      id: 'CHQ.EVN1916', title: 'Teen Beginner and Intermediate Sailing',
+      sessions: [], weeks: [9],
+      scheduledWeeks: [{
+        week: 9, daysOfWeek: ['Monday'], startTime: '9:00 AM', endTime: '12:00 PM',
+        location: 'John R. Turney Sailing Center', room: '',
+        weekStart: '2026-08-24', weekEnd: '2026-08-28',
+      }],
+    })]));
+    render(<ClassesPage />);
+
+    expect(await screen.findByText('Not listed')).toBeInTheDocument();
+    expect(screen.queryByText('Over')).not.toBeInTheDocument();
+  });
+
+  it('says a cancelled class was cancelled, not that it is over', async () => {
+    useClassData.mockReturnValue(loaded([makeClass({
+      id: 'catalog:12', title: 'Guided Gentle Stretch', catalogId: '12',
+      sessions: [], weeks: [3], sourceUrl: '',
+      provenance: { catalog: true, lastObserved: null, status: 'cancelled' },
+      scheduledWeeks: [{
+        week: 3, daysOfWeek: ['Thursday'], startTime: '3:00 PM', endTime: '5:00 PM',
+        location: 'Heinz Beach', room: '',
+        weekStart: '2026-07-13', weekEnd: '2026-07-17',
+      }],
+    })]));
+    render(<ClassesPage />);
+
+    // A cancelled class has nothing but printed weeks, so folding them would
+    // leave an empty card. They show as they are.
+    // Two Cancelled marks: the class-level one and the week's own.
+    expect((await screen.findAllByText('Cancelled')).length).toBeGreaterThan(1);
+    expect(screen.queryByText('Over')).not.toBeInTheDocument();
   });
 
   it('narrows to what can still be joined through the Spots picker', async () => {

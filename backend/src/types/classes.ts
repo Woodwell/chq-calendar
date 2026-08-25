@@ -73,6 +73,16 @@ export interface ScheduledWeek {
   endTime: string;
   location: string;
   room: string;
+  /**
+   * When this season week ran, dated from the crawl's own sessions. Null when
+   * no session anywhere fell in that week, which is every week off-season.
+   *
+   * The catalog numbers its weeks and never dates them, so without this a
+   * reader cannot tell a printed week already past from one still to come —
+   * and a card ends up calling a week in September "over".
+   */
+  weekStart: string | null;
+  weekEnd: string | null;
 }
 
 /** A class as it appears in a search-results row (no per-session detail). */

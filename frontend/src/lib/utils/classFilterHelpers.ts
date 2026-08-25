@@ -1,4 +1,4 @@
-import type { ChqClass, ClassSession, ScheduledWeek } from '@/lib/classTypes';
+import type { ChqClass, ClassSession, ClassStatus, ScheduledWeek } from '@/lib/classTypes';
 import { classWeekKey } from '@/lib/classTypes';
 
 export type AvailabilityFilter = 'all' | 'open' | 'waitlist';
@@ -231,9 +231,18 @@ export function isSessionOver(session: ClassSession, nowLocal: string): boolean 
 export type ClassLifecycle = 'upcoming' | 'running' | 'ended';
 
 export function classLifecycle(chqClass: ChqClass, nowLocal: string): ClassLifecycle {
-  // No session left to speak of. The catalog may still describe it, but
-  // nothing about it is ahead of us.
-  if (chqClass.sessions.length === 0) return 'ended';
+  if (chqClass.sessions.length === 0) {
+    // No session to go on, but the printed schedule may still put this class
+    // ahead of us — ten classes are listed all season with nothing bookable,
+    // and calling those history because the site offers no session today is
+    // how a sailing course that runs to week nine ended up filed under
+    // "over". A cancelled class is the exception: it is not coming.
+    if (chqClass.provenance.status === 'cancelled') return 'ended';
+    const ahead = (chqClass.scheduledWeeks ?? []).some(
+      (w) => w.weekEnd !== null && w.weekEnd >= nowLocal.slice(0, 10),
+    );
+    return ahead ? 'upcoming' : 'ended';
+  }
 
   // Compared as full local datetimes, not day keys. On a date alone a class
   // starting at four in the afternoon reads as under way all morning, and one
@@ -289,6 +298,27 @@ export function byLifecycle(nowLocal: string) {
     }
     return a.title.localeCompare(b.title);
   };
+}
+
+/**
+ * What to say about a week the catalog printed and the crawl cannot see.
+ *
+ * Three different things, and calling all of them "Over" was wrong twice.
+ * A cancelled class did not finish, it was pulled. A week still ahead has not
+ * finished either — the ticket site simply offers nothing to book in it.
+ */
+export type ScheduledWeekState = 'over' | 'cancelled' | 'unlisted';
+
+export function scheduledWeekState(
+  scheduled: ScheduledWeek,
+  status: ClassStatus,
+  nowLocal: string,
+): ScheduledWeekState {
+  if (status === 'cancelled') return 'cancelled';
+  // Undated weeks cannot be called past. Off-season that is all of them, and
+  // "over" would then be a guess dressed as a fact.
+  if (scheduled.weekEnd === null) return 'unlisted';
+  return scheduled.weekEnd < nowLocal.slice(0, 10) ? 'over' : 'unlisted';
 }
 
 /** Sessions that have not finished yet — what "still running" actually means. */
