@@ -12,7 +12,7 @@ import { ClassCard } from '@/components/classes/ClassCard';
 import { ClassFilters } from '@/components/classes/ClassFilters';
 import { useClassData } from '@/hooks/useClassData';
 import { useClassFilterState } from '@/hooks/useClassFilterState';
-import { useFavorites } from '@/hooks/useFavorites';
+import { CLASS_FAVORITES_KEY, useFavorites } from '@/hooks/useFavorites';
 import { getDefaultYear } from '@/lib/constants';
 import { buildInfo, formatBuildTime, isDemoBuild } from '@/lib/demoMode';
 import type { ClassSession, ScheduledWeek } from '@/lib/classTypes';
@@ -57,7 +57,9 @@ export function describeAge(generatedAt: string, now: number = Date.now()): stri
 export default function ClassesPage() {
   const year = getDefaultYear();
   const { classes, generatedAt, loading, error } = useClassData(year);
-  const favorites = useFavorites();
+  // Its own store, so starring a class does not raise the calendar's badge
+  // over things the calendar cannot show.
+  const favorites = useFavorites(CLASS_FAVORITES_KEY);
   const filterState = useClassFilterState();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 

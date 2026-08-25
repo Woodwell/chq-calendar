@@ -179,46 +179,6 @@ export function ClassFilters({
 
       {!open ? null : (
       <>
-      <Group label="Spots">
-        {AVAILABILITY.map(({ value, label, title }) => (
-          <Toggle
-            key={value}
-            label={label}
-            title={title}
-            active={filters.availability === value}
-            onClick={() => onSetAvailability(value)}
-          />
-        ))}
-        <Toggle
-          label={`★ ${favoriteCount}`}
-          title="Only the sessions you have starred"
-          active={filters.showFavoritesOnly}
-          onClick={onToggleFavoritesOnly}
-        />
-      </Group>
-
-      {categories.length > 0 && (
-        <CollapsibleGroup
-          label="Category"
-          options={categories.map((category) => ({
-            value: category,
-            active: filters.selectedCategories.includes(category),
-          }))}
-          onToggle={onToggleCategory}
-        />
-      )}
-
-      {venues.length > 0 && (
-        <CollapsibleGroup
-          label="Venue"
-          options={venues.map((venue) => ({
-            value: venue,
-            active: filters.selectedVenues.includes(venue),
-          }))}
-          onToggle={onToggleVenue}
-        />
-      )}
-
       {/* Weeks come from the printed schedule, so all nine stay selectable
           once the season is under way — the catalog remembers a week the
           ticket site has already dropped. Days still come from the sessions
@@ -238,19 +198,44 @@ export function ClassFilters({
         </Group>
       )}
 
-      {days.length > 0 && (
-        <Group label="Day">
-          {days.map((day) => (
-            <Toggle
-              key={day}
-              label={day.slice(0, 3)}
-              name={day}
-              title={day}
-              active={filters.selectedDays.includes(day)}
-              onClick={() => onToggleDay(day)}
-            />
-          ))}
-        </Group>
+      {categories.length > 0 && (
+        <CollapsibleGroup
+          label="Category"
+          options={categories.map((category) => ({
+            value: category,
+            active: filters.selectedCategories.includes(category),
+          }))}
+          onToggle={onToggleCategory}
+        />
+      )}
+
+      <Group label="Spots">
+        {AVAILABILITY.map(({ value, label, title }) => (
+          <Toggle
+            key={value}
+            label={label}
+            title={title}
+            active={filters.availability === value}
+            onClick={() => onSetAvailability(value)}
+          />
+        ))}
+        <Toggle
+          label={`★ ${favoriteCount}`}
+          title="Only the sessions you have starred"
+          active={filters.showFavoritesOnly}
+          onClick={onToggleFavoritesOnly}
+        />
+      </Group>
+
+      {venues.length > 0 && (
+        <CollapsibleGroup
+          label="Venue"
+          options={venues.map((venue) => ({
+            value: venue,
+            active: filters.selectedVenues.includes(venue),
+          }))}
+          onToggle={onToggleVenue}
+        />
       )}
 
       {/* How many days a week, as against which days — "only want a one-off"
@@ -265,6 +250,21 @@ export function ClassFilters({
               title={`Classes meeting ${n} ${n === 1 ? 'day' : 'days'} a week`}
               active={filters.meetingDays.includes(n)}
               onClick={() => onToggleMeetingDays(n)}
+            />
+          ))}
+        </Group>
+      )}
+
+      {days.length > 0 && (
+        <Group label="Day">
+          {days.map((day) => (
+            <Toggle
+              key={day}
+              label={day.slice(0, 3)}
+              name={day}
+              title={day}
+              active={filters.selectedDays.includes(day)}
+              onClick={() => onToggleDay(day)}
             />
           ))}
         </Group>

@@ -296,14 +296,14 @@ describe('ClassesPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
 
     await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem('chq-calendar-favorites') ?? '{}');
+      const stored = JSON.parse(localStorage.getItem('chq-classes-favorites') ?? '{}');
       expect(stored.eventIds).toEqual(['class:CHQ.EVN1908:week8']);
     });
   });
 
   it('keeps a starred week out of the fold', async () => {
     // Folding away a week someone has starred would hide their own mark.
-    localStorage.setItem('chq-calendar-favorites', JSON.stringify({
+    localStorage.setItem('chq-classes-favorites', JSON.stringify({
       eventIds: ['class:CHQ.EVN9:week2'], lastSaved: Date.now(),
     }));
     useClassData.mockReturnValue(loaded([makeClass({
@@ -405,7 +405,7 @@ describe('ClassesPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
 
     await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem('chq-calendar-favorites') ?? '{}');
+      const stored = JSON.parse(localStorage.getItem('chq-classes-favorites') ?? '{}');
       // Favorites are one flat set shared with the calendar, so the class
       // prefix is what keeps a week from colliding with an event id. The week
       // rather than the session id, so the star survives the site dropping
