@@ -9,6 +9,7 @@ import {
   availableWeeks,
   filterClasses,
   isSessionOver,
+  parsePrintedHour,
   getTimeBucket,
   hasActiveFilters,
   sessionMatches,
@@ -104,6 +105,65 @@ describe('filterClasses', () => {
       .toEqual(['a', 'b']);
     expect(filterClasses(classes, { ...EMPTY_CLASS_FILTERS, selectedDays: ['Monday'] }).map(c => c.id))
       .toEqual(['a']);
+  });
+
+  describe('a finished week, answered from the printed schedule', () => {
+    const printed = (over = {}) => ({
+      week: 2, daysOfWeek: ['Monday', 'Wednesday'],
+      startTime: '9:00 AM', endTime: '10:15 AM',
+      location: 'Hultquist', room: '101', ...over,
+    });
+    const past = (over = {}) => {
+      const c = chqClass('past', []);
+      c.weeks = [2];
+      c.scheduledWeeks = [printed(over)];
+      return c;
+    };
+    const pick = (c: ChqClass, f: Partial<typeof EMPTY_CLASS_FILTERS>) =>
+      filterClasses([c], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [2], ...f }).length;
+
+    it('answers the day filter', () => {
+      expect(pick(past(), { selectedDays: ['Monday'] })).toBe(1);
+      expect(pick(past(), { selectedDays: ['Tuesday'] })).toBe(0);
+    });
+
+    it('answers how many days a week it met', () => {
+      expect(pick(past(), { meetingDays: [2] })).toBe(1);
+      expect(pick(past(), { meetingDays: [5] })).toBe(0);
+    });
+
+    it('answers time of day from the printed clock time', () => {
+      expect(pick(past(), { timeOfDay: 'morning' })).toBe(1);
+      expect(pick(past(), { timeOfDay: 'afternoon' })).toBe(0);
+      expect(pick(past({ startTime: '12:30 PM' }), { timeOfDay: 'afternoon' })).toBe(1);
+      expect(pick(past({ startTime: '7:00 PM' }), { timeOfDay: 'evening' })).toBe(1);
+    });
+
+    it('still refuses the questions only a crawl could answer', () => {
+      // No spot count and no session id ever existed for a finished week.
+      expect(pick(past(), { availability: 'open' })).toBe(0);
+      expect(pick(past(), { showFavoritesOnly: true })).toBe(0);
+    });
+
+    it('answers only the week when there is no printed schedule at all', () => {
+      // A listing the catalog never covered, or an older published file.
+      const bare = chqClass('bare', []);
+      bare.weeks = [2];
+      bare.scheduledWeeks = [];
+      expect(pick(bare, {})).toBe(1);
+      // Nothing knows its days or times, so those must not appear answerable.
+      expect(pick(bare, { selectedDays: ['Monday'] })).toBe(0);
+      expect(pick(bare, { timeOfDay: 'morning' })).toBe(0);
+    });
+
+    it('will not bucket a printed time it cannot read', () => {
+      expect(parsePrintedHour('9:00 AM')).toBe(9);
+      expect(parsePrintedHour('12:30 PM')).toBe(12);
+      expect(parsePrintedHour('12:15 AM')).toBe(0);
+      expect(parsePrintedHour('noon')).toBeNull();
+      // Unreadable means it belongs to no bucket, rather than to morning.
+      expect(pick(past({ startTime: 'noon' }), { timeOfDay: 'morning' })).toBe(0);
+    });
   });
 
   it('treats a session as over once its end date has passed', () => {

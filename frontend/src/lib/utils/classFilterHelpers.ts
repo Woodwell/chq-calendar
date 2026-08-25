@@ -1,4 +1,4 @@
-import type { ChqClass, ClassSession } from '@/lib/classTypes';
+import type { ChqClass, ClassSession, ScheduledWeek } from '@/lib/classTypes';
 import { classSessionKey } from '@/lib/classTypes';
 
 export type AvailabilityFilter = 'all' | 'open' | 'waitlist';
@@ -126,6 +126,68 @@ export function weeksOf(chqClass: ChqClass): number[] {
 }
 
 /**
+ * The hour from a printed time like "9:00 AM" or "12:30 PM", 0-23.
+ *
+ * The catalog prints a clock face where the crawl gives an ISO datetime, so
+ * this is what lets a week already past answer a time-of-day question at all.
+ * Returns null for anything it does not recognise rather than guessing an
+ * hour, since a wrong bucket is worse than no bucket.
+ */
+export function parsePrintedHour(label: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})\s*(am|pm)$/i.exec(label.trim());
+  if (!m) return null;
+  const hour = Number(m[1]) % 12;
+  return /pm/i.test(m[3]) ? hour + 12 : hour;
+}
+
+/** The same buckets as `getTimeBucket`, read off the catalog's printed time. */
+export function scheduledTimeBucket(scheduled: ScheduledWeek): Exclude<TimeOfDay, 'all'> | null {
+  const hour = parsePrintedHour(scheduled.startTime);
+  if (hour === null) return null;
+  if (hour < 12) return 'morning';
+  if (hour < 17) return 'afternoon';
+  return 'evening';
+}
+
+/**
+ * Filters no source but the crawl can answer.
+ *
+ * Availability and favourites are facts about a specific session: how full a
+ * class was is something only a crawl could have seen, and a favourite is
+ * keyed on a session id the catalog does not have. A week already past has
+ * neither, so asking for them is asking for nothing.
+ */
+export function hasCrawlOnlyFilters(options: ClassFilterOptions): boolean {
+  return options.availability !== 'all' || options.showFavoritesOnly;
+}
+
+/**
+ * Whether a week the catalog printed satisfies every filter that can be
+ * judged without a session.
+ *
+ * Day, time of day and how many days a week the class meets are all printed
+ * in the catalog, so a finished week can answer them exactly as a live
+ * session would.
+ */
+export function scheduledMatches(scheduled: ScheduledWeek, options: ClassFilterOptions): boolean {
+  if (options.selectedWeeks.length > 0 && !options.selectedWeeks.includes(scheduled.week)) return false;
+  if (
+    options.selectedDays.length > 0 &&
+    !scheduled.daysOfWeek.some((day) => options.selectedDays.includes(day))
+  ) return false;
+  if (
+    options.meetingDays.length > 0 &&
+    !options.meetingDays.includes(scheduled.daysOfWeek.length)
+  ) return false;
+  if (options.timeOfDay !== 'all') {
+    const bucket = scheduledTimeBucket(scheduled);
+    // An unreadable printed time cannot claim to be in any bucket.
+    if (bucket !== options.timeOfDay) return false;
+  }
+  return true;
+}
+
+/**
  * Whether a session has already finished.
  *
  * The ticket site is slow to drop a session once its week is over — seven
@@ -180,7 +242,6 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
   // set. A class whose sessions have all passed has none to match, so an
   // unconditional `.some()` would drop every finished class the moment
   // someone typed a search term.
-  const byOtherSession = hasNonWeekSessionFilters(options);
   const bySession = hasSessionFilters(options);
   return classes.filter((c) => {
     if (!matchesSearch(c, term)) return false;
@@ -193,11 +254,23 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
     // is what keeps "Monday" and "evening" meaning one Monday evening.
     if (c.sessions.length > 0 && c.sessions.some((s) => sessionMatches(c.id, s, options))) return true;
 
-    // Without a session in scope the only session property still answerable
-    // is the week, from the schedule the catalog printed. That is what makes
-    // a week already past filterable at all — but it is also all we know, so
-    // any other session filter has to fail rather than be waved through.
-    if (byOtherSession) return false;
+    // No session in scope, so fall back to the week the catalog printed —
+    // which knows the days, the clock times and how many days a week the
+    // class met, and can answer all three exactly as a session would.
+    //
+    // Availability and favourites it cannot answer, and must not appear to:
+    // a finished week has no spot count and no session id, so those filters
+    // correctly match nothing rather than being waved through.
+    if (hasCrawlOnlyFilters(options)) return false;
+
+    const printed = c.scheduledWeeks ?? [];
+    if (printed.length > 0) return printed.some((w) => scheduledMatches(w, options));
+
+    // No printed schedule either: a listing the catalog never covered, or a
+    // file published before the field existed. The week is then genuinely all
+    // that is known, so day, time and meeting length have to fail rather than
+    // be answered from nothing.
+    if (hasNonWeekSessionFilters(options)) return false;
     return matchesWeeks(c, options.selectedWeeks);
   });
 }

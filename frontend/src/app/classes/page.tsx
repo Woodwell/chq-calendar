@@ -15,7 +15,7 @@ import { useClassFilterState } from '@/hooks/useClassFilterState';
 import { useFavorites } from '@/hooks/useFavorites';
 import { getDefaultYear } from '@/lib/constants';
 import { buildInfo, formatBuildTime, isDemoBuild } from '@/lib/demoMode';
-import type { ChqClass, ClassSession } from '@/lib/classTypes';
+import type { ChqClass, ClassSession, ScheduledWeek } from '@/lib/classTypes';
 import {
   activeFilterCount,
   availableDays,
@@ -26,6 +26,7 @@ import {
   hasActiveFilters,
   hasSessionFilters,
   isSessionOver,
+  scheduledMatches,
   sessionMatches,
   upcomingSessions,
 } from '@/lib/utils/classFilterHelpers';
@@ -281,8 +282,8 @@ export default function ClassesPage() {
                     onToggleFavorite={favorites.toggleFavorite}
                     selectedWeeks={options.selectedWeeks}
                     todayKey={todayKey}
-                    weekMatches={dimming && options.selectedWeeks.length > 0
-                      ? (week: number) => options.selectedWeeks.includes(week)
+                    scheduledMatches={dimming
+                      ? (w: ScheduledWeek) => scheduledMatches(w, options)
                       : undefined}
                     sessionMatches={dimming
                       ? (sx: ClassSession) => sessionMatches(chqClass.id, sx, options)

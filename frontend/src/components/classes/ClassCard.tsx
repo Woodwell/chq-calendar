@@ -182,11 +182,12 @@ interface ClassCardProps {
    */
   sessionMatches?: (session: ClassSession) => boolean;
   /**
-   * Whether a week with no session left survives the active filters. Separate
-   * from `sessionMatches` because there is no session to hand it — only the
-   * week is known, so only the week can be judged.
+   * Whether a week the catalog printed survives the active filters. Separate
+   * from `sessionMatches` because there is no session to hand it — the
+   * printed schedule answers day, time and meeting length, but never
+   * availability.
    */
-  weekMatches?: (week: number) => boolean;
+  scheduledMatches?: (scheduled: ScheduledWeek) => boolean;
   /**
    * Weeks the reader has filtered to. Narrows which rows the card draws at
    * all, rather than only which are dimmed.
@@ -234,7 +235,7 @@ function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
 
 export function ClassCard({
   chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite,
-  sessionMatches, weekMatches = () => true, selectedWeeks = [], todayKey,
+  sessionMatches, scheduledMatches, selectedWeeks = [], todayKey,
 }: ClassCardProps) {
   const rows = scheduleRows(chqClass, selectedWeeks);
 
@@ -313,7 +314,7 @@ export function ClassCard({
               <ScheduledRow
                 key={`week-${row.scheduled.week}`}
                 scheduled={row.scheduled}
-                matches={weekMatches(row.scheduled.week)}
+                matches={scheduledMatches ? scheduledMatches(row.scheduled) : true}
               />
             )))}
           </ul>
