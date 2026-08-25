@@ -8,9 +8,11 @@ import {
   availableDays,
   availableWeeks,
   filterClasses,
+  isSessionOver,
   getTimeBucket,
   hasActiveFilters,
   sessionMatches,
+  upcomingSessions,
 } from '../classFilterHelpers';
 import type { ChqClass, ClassSession } from '@/lib/classTypes';
 
@@ -102,6 +104,26 @@ describe('filterClasses', () => {
       .toEqual(['a', 'b']);
     expect(filterClasses(classes, { ...EMPTY_CLASS_FILTERS, selectedDays: ['Monday'] }).map(c => c.id))
       .toEqual(['a']);
+  });
+
+  it('treats a session as over once its end date has passed', () => {
+    // The ticket site keeps a session listed for days after it runs, spot
+    // count and all. The clock is what settles it.
+    const ran = session({ endDate: '2026-08-22 15:00:00' });
+    expect(isSessionOver(ran, '2026-08-25')).toBe(true);
+    // Still running today: the last day counts as not over.
+    expect(isSessionOver(ran, '2026-08-22')).toBe(false);
+    expect(isSessionOver(ran, '2026-08-21')).toBe(false);
+  });
+
+  it('counts only unfinished sessions as still running', () => {
+    const c = chqClass('mixed', [
+      session({ week: 8, endDate: '2026-08-21 15:00:00' }),
+      session({ week: 9, endDate: '2026-08-28 15:00:00' }),
+    ]);
+    expect(upcomingSessions(c, '2026-08-25').map(s => s.week)).toEqual([9]);
+    // Every session behind us: the class is over, however the site lists it.
+    expect(upcomingSessions(c, '2026-09-01')).toEqual([]);
   });
 
   it('finds a class by a week whose sessions the site has already dropped', () => {

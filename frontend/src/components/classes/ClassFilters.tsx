@@ -75,10 +75,8 @@ interface ClassFiltersProps {
   days: string[];
   meetingDayOptions: number[];
   favoriteCount: number;
-  finishedCount: number;
   activeCount: number;
   onSetSearchTerm: (value: string) => void;
-  onToggleIncludeFinished: () => void;
   onSetAvailability: (value: AvailabilityFilter) => void;
   onSetTimeOfDay: (value: TimeOfDay) => void;
   onToggleCategory: (category: string) => void;
@@ -89,8 +87,8 @@ interface ClassFiltersProps {
 }
 
 export function ClassFilters({
-  filters, categories, weeks, days, meetingDayOptions, favoriteCount, finishedCount, activeCount,
-  onSetSearchTerm, onToggleIncludeFinished,
+  filters, categories, weeks, days, meetingDayOptions, favoriteCount, activeCount,
+  onSetSearchTerm,
   onSetAvailability, onSetTimeOfDay, onToggleCategory, onToggleWeek, onToggleDay,
   onToggleMeetingDays, onToggleFavoritesOnly,
 }: ClassFiltersProps) {
@@ -225,19 +223,6 @@ export function ClassFilters({
 
       {/* Not one of the pickers: this decides what the catalog even contains,
           so it sits apart from them and survives "clear filters". */}
-      {finishedCount > 0 && (
-        <div className="pt-1 border-t border-gray-100 dark:border-gray-700">
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={filters.includeFinished}
-              onChange={onToggleIncludeFinished}
-              className="rounded border-gray-300 dark:border-gray-600"
-            />
-            Include {finishedCount} you can no longer book
-          </label>
-        </div>
-      )}
       </>
       )}
     </section>

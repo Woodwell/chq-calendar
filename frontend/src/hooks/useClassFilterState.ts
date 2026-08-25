@@ -21,12 +21,6 @@ export interface ClassFilterState {
   meetingDays: number[];
   timeOfDay: TimeOfDay;
   showFavoritesOnly: boolean;
-  /**
-   * Whether to list classes whose sessions have all passed. Off by default:
-   * late in the season they are most of the catalog — 361 of 466 in late
-   * August — and none of them can be signed up for.
-   */
-  includeFinished: boolean;
 }
 
 const EMPTY: ClassFilterState = {
@@ -38,7 +32,6 @@ const EMPTY: ClassFilterState = {
   meetingDays: [],
   timeOfDay: 'all',
   showFavoritesOnly: false,
-  includeFinished: false,
 };
 
 interface StoredState extends ClassFilterState {
@@ -61,7 +54,6 @@ function load(): ClassFilterState {
       meetingDays: Array.isArray(parsed.meetingDays) ? parsed.meetingDays : [],
       timeOfDay: parsed.timeOfDay ?? EMPTY.timeOfDay,
       showFavoritesOnly: parsed.showFavoritesOnly ?? false,
-      includeFinished: parsed.includeFinished ?? false,
     };
   } catch {
     return EMPTY;
@@ -88,10 +80,6 @@ export function useClassFilterState() {
 
   const setSearchTerm = useCallback((searchTerm: string) => {
     setFilters((f) => ({ ...f, searchTerm }));
-  }, []);
-
-  const toggleIncludeFinished = useCallback(() => {
-    setFilters((f) => ({ ...f, includeFinished: !f.includeFinished }));
   }, []);
 
   const setAvailability = useCallback((availability: AvailabilityFilter) => {
@@ -122,17 +110,11 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, showFavoritesOnly: !f.showFavoritesOnly }));
   }, []);
 
-  // Clearing filters is about the search and the pickers; whether finished
-  // classes are listed is a separate choice and stays where it was put.
-  const clearAll = useCallback(
-    () => setFilters((f) => ({ ...EMPTY, includeFinished: f.includeFinished })),
-    [],
-  );
+  const clearAll = useCallback(() => setFilters(EMPTY), []);
 
   return {
     filters,
     setSearchTerm,
-    toggleIncludeFinished,
     setAvailability,
     setTimeOfDay,
     toggleCategory,

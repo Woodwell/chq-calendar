@@ -1,5 +1,6 @@
 import type { ChqClass, ClassProvenance, ClassSession, ScheduledWeek } from '@/lib/classTypes';
 import { classSessionKey } from '@/lib/classTypes';
+import { isSessionOver } from '@/lib/utils/classFilterHelpers';
 
 /**
  * How a session's availability reads. Spot counts come straight from the
@@ -66,14 +67,22 @@ interface SessionRowProps {
   session: ClassSession;
   classId: string;
   registerUrl: string;
+  /**
+   * The session has already run. The ticket site keeps one listed for days
+   * afterwards, spot count and all, so without this the card offers a
+   * Register button for a class that is over.
+   */
+  isOver: boolean;
   isFavorite: boolean;
   onToggleFavorite: (key: string) => void;
   /** False when filters are active and this session is not one of the matches. */
   matches: boolean;
 }
 
-function SessionRow({ session, classId, registerUrl, isFavorite, onToggleFavorite, matches }: SessionRowProps) {
-  const badge = availabilityLabel(session);
+function SessionRow({ session, classId, registerUrl, isOver, isFavorite, onToggleFavorite, matches }: SessionRowProps) {
+  const badge = isOver
+    ? { text: 'Over', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' }
+    : availabilityLabel(session);
   const key = classSessionKey(classId, session.performanceId);
 
   return (
@@ -109,14 +118,16 @@ function SessionRow({ session, classId, registerUrl, isFavorite, onToggleFavorit
         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge.className}`}>
           {badge.text}
         </span>
-        <a
-          href={registerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-        >
-          Register
-        </a>
+        {!isOver && (
+          <a
+            href={registerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            Register
+          </a>
+        )}
       </div>
     </li>
   );
@@ -136,12 +147,21 @@ type ScheduleRow =
  * crawl can still see keep their live detail and spot count; the rest fall
  * back to the schedule the catalog printed.
  */
-export function scheduleRows(chqClass: ChqClass): ScheduleRow[] {
+export function scheduleRows(chqClass: ChqClass, selectedWeeks: number[] = []): ScheduleRow[] {
   const bySession = new Map(chqClass.sessions.map((s) => [s.week, s]));
   const scheduled = new Map((chqClass.scheduledWeeks ?? []).map((w) => [w.week, w]));
   const weeks = [...new Set([...bySession.keys(), ...scheduled.keys()])].sort((a, b) => a - b);
 
-  return weeks.map((week) => {
+  // Filtering to a week is a question about that week. A class running all
+  // nine would otherwise answer with seven rows nobody asked about, so the
+  // finished weeks outside the selection are dropped — but every week with a
+  // live session stays, because "and what can I still join?" is the other
+  // half of the same question.
+  const inScope = selectedWeeks.length === 0
+    ? weeks
+    : weeks.filter((w) => selectedWeeks.includes(w) || bySession.has(w));
+
+  return inScope.map((week) => {
     const session = bySession.get(week);
     if (session) return { session };
     return { scheduled: scheduled.get(week)! };
@@ -167,6 +187,16 @@ interface ClassCardProps {
    * week is known, so only the week can be judged.
    */
   weekMatches?: (week: number) => boolean;
+  /**
+   * Weeks the reader has filtered to. Narrows which rows the card draws at
+   * all, rather than only which are dimmed.
+   */
+  selectedWeeks?: number[];
+  /**
+   * The Institution's date, YYYY-MM-DD. Supplied by the caller so it is read
+   * once per render rather than once per session row.
+   */
+  todayKey?: string;
 }
 
 /**
@@ -204,9 +234,9 @@ function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
 
 export function ClassCard({
   chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite,
-  sessionMatches, weekMatches = () => true,
+  sessionMatches, weekMatches = () => true, selectedWeeks = [], todayKey,
 }: ClassCardProps) {
-  const rows = scheduleRows(chqClass);
+  const rows = scheduleRows(chqClass, selectedWeeks);
 
   return (
     <article className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-5">
@@ -274,6 +304,7 @@ export function ClassCard({
                 session={row.session}
                 classId={chqClass.id}
                 registerUrl={chqClass.sourceUrl}
+                isOver={todayKey ? isSessionOver(row.session, todayKey) : false}
                 isFavorite={isFavorite(classSessionKey(chqClass.id, row.session.performanceId))}
                 onToggleFavorite={onToggleFavorite}
                 matches={sessionMatches ? sessionMatches(row.session) : true}

@@ -25,8 +25,11 @@ import {
   filterClasses,
   hasActiveFilters,
   hasSessionFilters,
+  isSessionOver,
   sessionMatches,
+  upcomingSessions,
 } from '@/lib/utils/classFilterHelpers';
+import { chqDayKey } from '@/lib/utils/chqTime';
 
 const CATALOG_URL =
   'https://tickets.chq.org/searchclasses.html?subjectParentCat=L2_CC_SUB&weekParentCat=SEAS_WKS';
@@ -82,18 +85,17 @@ export default function ClassesPage() {
   const days = useMemo(() => availableDays(classes), [classes]);
   const meetingDayOptions = useMemo(() => availableMeetingDays(classes), [classes]);
 
-  // "Finished" means there is nothing left to book, not that the class never
-  // happened — by late August that is most of the catalog. It is a filter on
-  // bookability, deliberately independent of which weeks are selected: asking
-  // for week 2 in August returns classes that all finished long ago, and
-  // those are exactly the ones this hides. The count of what it hides is
-  // shown next to the results, because otherwise the number moves for no
-  // visible reason.
-  const bookable = (c: ChqClass) => c.sessions.length > 0;
-  const inScope = useMemo(
-    () => (filterState.filters.includeFinished ? classes : classes.filter(bookable)),
-    [classes, filterState.filters.includeFinished],
-  );
+  // Everything the catalog knows about, past weeks included. There is no
+  // separate "hide the finished ones" switch any more: it covered the same
+  // ground as the Spots picker, which says the same thing better — Open and
+  // Waitlist both require a live session, so either one narrows to what can
+  // actually be joined.
+  // The Institution's today, read once. The ticket site keeps a session
+  // listed for a few days after it runs — seven were still showing live spot
+  // counts three days on — so the clock decides what is past, not the listing.
+  const todayKey = chqDayKey(new Date());
+  const bookable = (c: ChqClass) => upcomingSessions(c, todayKey).length > 0;
+  const inScope = classes;
 
   // Drawn from what is in scope, so hiding finished classes also drops the
   // categories only they had.
@@ -103,18 +105,11 @@ export default function ClassesPage() {
     () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
     [inScope, options, filtering],
   );
-  // How many of the results can still be signed up for. Stated alongside the
-  // total so "102 classes" does not read as "102 classes with places".
+  // How many of the results have a session still to come. Stated alongside
+  // the total so "516 classes" does not read as "516 you could still join".
+  // Deliberately not "with places left": nine of them are waitlist-only, and
+  // a waitlist is not a place.
   const bookableVisible = useMemo(() => visible.filter(bookable).length, [visible]);
-
-  // What the bookability filter is holding back, counted against the same
-  // filters as the results — otherwise the offer to show them is a number
-  // that has nothing to do with what is on screen.
-  const hiddenUnbookable = useMemo(() => {
-    if (filterState.filters.includeFinished) return 0;
-    const unbookable = classes.filter((c) => !bookable(c));
-    return (filtering ? filterClasses(unbookable, options) : unbookable).length;
-  }, [classes, options, filtering, filterState.filters.includeFinished]);
 
   const matchingSessions = useMemo(
     () => visible.reduce(
@@ -229,10 +224,8 @@ export default function ClassesPage() {
               days={days}
               meetingDayOptions={meetingDayOptions}
               favoriteCount={favorites.favoriteCount}
-              finishedCount={hiddenUnbookable || classes.filter((c) => !bookable(c)).length}
               activeCount={activeFilterCount(options)}
               onSetSearchTerm={filterState.setSearchTerm}
-              onToggleIncludeFinished={filterState.toggleIncludeFinished}
               onSetAvailability={filterState.setAvailability}
               onSetTimeOfDay={filterState.setTimeOfDay}
               onToggleCategory={filterState.toggleCategory}
@@ -246,19 +239,7 @@ export default function ClassesPage() {
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 {`${visible.length} ${visible.length === 1 ? 'class' : 'classes'}`}
                 {bookableVisible > 0 && (
-                  <span>{` · ${bookableVisible} with places left`}</span>
-                )}
-                {hiddenUnbookable > 0 && (
-                  <>
-                    {' · '}
-                    <button
-                      type="button"
-                      onClick={filterState.toggleIncludeFinished}
-                      className="text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      {`show ${hiddenUnbookable} you can no longer book`}
-                    </button>
-                  </>
+                  <span>{` · ${bookableVisible} still running`}</span>
                 )}
                 {filtering && (
                   <button
@@ -298,6 +279,8 @@ export default function ClassesPage() {
                     onToggleDescription={toggleDescription}
                     isFavorite={favorites.isFavorite}
                     onToggleFavorite={favorites.toggleFavorite}
+                    selectedWeeks={options.selectedWeeks}
+                    todayKey={todayKey}
                     weekMatches={dimming && options.selectedWeeks.length > 0
                       ? (week: number) => options.selectedWeeks.includes(week)
                       : undefined}

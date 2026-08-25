@@ -58,10 +58,28 @@ const loaded = (classes: ChqClass[]) => ({
   classes, generatedAt: new Date().toISOString(), loading: false, error: null,
 });
 
+/**
+ * Mid-week 8, while the fixture's Aug 17-21 session is running.
+ *
+ * Pinned because the page asks the clock whether a session is over — the
+ * ticket site keeps one listed for days after it runs, so the date decides.
+ * Left to the real clock these tests would pass until late August and then
+ * quietly invert.
+ */
+const NOW = new Date('2026-08-18T12:00:00Z');
+
 beforeEach(() => {
+  // shouldAdvanceTime keeps testing-library's async queries working; without
+  // it findBy* waits on timers that never fire.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(NOW);
   vi.clearAllMocks();
   localStorage.clear();
   demoState.isDemoBuild = false;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 /**
@@ -70,12 +88,6 @@ beforeEach(() => {
  */
 async function openFilters() {
   fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }));
-}
-
-/** Classes with nothing left to book are hidden by default; this is the box. */
-async function includeFinished() {
-  await openFilters();
-  fireEvent.click(screen.getByRole('checkbox', { name: /Include \d+ you can no longer book/ }));
 }
 
 describe('bySoonestSession', () => {
@@ -128,7 +140,6 @@ describe('ClassesPage', () => {
     render(<ClassesPage />);
 
     // Hidden with the rest of the finished catalog until asked for.
-    await includeFinished();
 
     expect(await screen.findByText('Not listed online')).toBeInTheDocument();
     // No page to register on, so the title must not be a link to nowhere.
@@ -143,8 +154,6 @@ describe('ClassesPage', () => {
       provenance: { catalog: true, lastObserved: '2026-08-13', status: 'cancelled' },
     })]));
     render(<ClassesPage />);
-
-    await includeFinished();
     expect(await screen.findByText('Cancelled')).toBeInTheDocument();
     expect(screen.queryByText('Not listed online')).not.toBeInTheDocument();
   });
@@ -171,7 +180,7 @@ describe('ClassesPage', () => {
     expect(screen.queryByText(/spots left/)).not.toBeInTheDocument();
   });
 
-  it('hides classes whose sessions have all passed, and offers them by count', async () => {
+  it('lists a class whose weeks have all passed, from the printed schedule', async () => {
     useClassData.mockReturnValue(loaded([makeClass(), makeClass({
       id: 'CHQ.EVN9', title: 'Finished Class', sessions: [], weeks: [2],
       scheduledWeeks: [{
@@ -182,20 +191,56 @@ describe('ClassesPage', () => {
     })]));
     render(<ClassesPage />);
 
-    // Late in the season these are most of the catalog and none can be
-    // signed up for, so the page opens on what is actually available.
-    expect(await screen.findByText('Watercolors for Beginners')).toBeInTheDocument();
-    expect(screen.queryByText('Finished Class')).not.toBeInTheDocument();
-
-    await includeFinished();
+    // Shown by default now. The season's history is the point of the page
+    // off-season, and Spots is the control for narrowing to what is joinable.
     expect(await screen.findByText('Finished Class')).toBeInTheDocument();
-    // The ticket site has dropped the week 2 session, so the card falls back
-    // to the schedule the catalog printed rather than going blank.
+    // The ticket site dropped the week 2 session, so the card falls back to
+    // the schedule the catalog printed rather than going blank.
     expect(screen.getByText('Week 2')).toBeInTheDocument();
     expect(screen.getByText(/Monday, Wednesday · 9:00 AM - 10:15 AM · 📍 Hultquist 101/))
       .toBeInTheDocument();
     // No spot count and no register link for a week that is over.
     expect(screen.getByText('Over')).toBeInTheDocument();
+  });
+
+  it('answers a week filter with that week and anything still joinable', async () => {
+    // A class running all season would otherwise reply to "week 2?" with
+    // seven rows about weeks nobody asked about.
+    useClassData.mockReturnValue(loaded([makeClass({
+      title: 'Runs All Season',
+      weeks: [2, 3, 4, 8],
+      scheduledWeeks: [2, 3, 4].map((week) => ({
+        week, daysOfWeek: ['Monday'], startTime: '9:00 AM', endTime: '10:00 AM',
+        location: 'Hultquist', room: '101',
+      })),
+    })]));
+    render(<ClassesPage />);
+    await openFilters();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Week 2' }));
+
+    await waitFor(() => expect(screen.getByText('Week 2')).toBeInTheDocument());
+    // Weeks 3 and 4 are finished and were not asked about.
+    expect(screen.queryByText('Week 3')).not.toBeInTheDocument();
+    expect(screen.queryByText('Week 4')).not.toBeInTheDocument();
+    // Week 8 still has a live session, which is the other half of the question.
+    expect(screen.getByText(/Week 8/)).toBeInTheDocument();
+    expect(screen.getByText('12 spots left')).toBeInTheDocument();
+  });
+
+  it('narrows to what can still be joined through the Spots picker', async () => {
+    useClassData.mockReturnValue(loaded([makeClass(), makeClass({
+      id: 'CHQ.EVN9', title: 'Finished Class', sessions: [], weeks: [2],
+      scheduledWeeks: [],
+    })]));
+    render(<ClassesPage />);
+    await openFilters();
+
+    // Open needs a live session, so a class with none drops out — which is
+    // the job the separate "include finished" checkbox used to duplicate.
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(screen.queryByText('Finished Class')).not.toBeInTheDocument());
+    expect(screen.getByText('Watercolors for Beginners')).toBeInTheDocument();
   });
 
   it('stars a single session, under a key that cannot collide with an event', async () => {

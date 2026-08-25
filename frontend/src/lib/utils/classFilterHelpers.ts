@@ -125,6 +125,26 @@ export function weeksOf(chqClass: ChqClass): number[] {
   return [...new Set((chqClass.sessions ?? []).map((s) => s.week))].sort((a, b) => a - b);
 }
 
+/**
+ * Whether a session has already finished.
+ *
+ * The ticket site is slow to drop a session once its week is over — seven
+ * were still listed with live spot counts three days after they ran. Trusting
+ * the listing alone therefore offers people a Register button for a class
+ * that already happened, so the clock gets the final say on what is past.
+ *
+ * `todayKey` is passed in rather than read here so the caller reads the
+ * Institution's date once, and so tests are not at the mercy of the clock.
+ */
+export function isSessionOver(session: ClassSession, todayKey: string): boolean {
+  return session.endDate.slice(0, 10) < todayKey;
+}
+
+/** Sessions that have not finished yet — what "still running" actually means. */
+export function upcomingSessions(chqClass: ChqClass, todayKey: string): ClassSession[] {
+  return chqClass.sessions.filter((s) => !isSessionOver(s, todayKey));
+}
+
 /** Whether the class is scheduled in any of the weeks asked for. */
 export function matchesWeeks(chqClass: ChqClass, selectedWeeks: number[]): boolean {
   if (selectedWeeks.length === 0) return true;
