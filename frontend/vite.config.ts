@@ -5,6 +5,24 @@ import { existsSync, createReadStream } from 'fs';
 import { execSync } from 'child_process';
 import { buildSitemapXml, PUBLIC_PATHS } from './src/lib/sitemap';
 
+/**
+ * Rewrites a bare path to its index.html, e.g. /classes -> /classes/.
+ *
+ * Vite in MPA mode does not do this, and neither does a plain file server —
+ * which is why the droplet's Caddyfile spells out `try_files {path}
+ * {path}/index.html`. `root` differs by server: the dev server reads the
+ * source tree, the preview server the build output.
+ *
+ * Returns the rewritten url, or null to leave it alone.
+ */
+function barePathRewrite(url: string | undefined, root: string): string | null {
+  if (!url) return null;
+  const urlPath = url.split('?')[0];
+  if (urlPath.endsWith('/') || urlPath.includes('.')) return null;
+  if (!existsSync(resolve(root, urlPath.slice(1), 'index.html'))) return null;
+  return urlPath + '/' + url.slice(urlPath.length);
+}
+
 // In MPA mode, Vite doesn't resolve bare paths like /feedback to /feedback/index.html.
 // This plugin adds that behavior so dev matches production (S3/CloudFront).
 // Also mocks POST /api/feedback so CAPTCHA isn't required in local dev.
@@ -37,15 +55,8 @@ function devServerMiddleware(): PluginOption {
         }
 
         // Rewrite bare paths to their index.html (e.g. /feedback → /feedback/)
-        if (req.url) {
-          const urlPath = req.url.split('?')[0];
-          if (!urlPath.endsWith('/') && !urlPath.includes('.')) {
-            const indexPath = resolve(__dirname, urlPath.slice(1), 'index.html');
-            if (existsSync(indexPath)) {
-              req.url = urlPath + '/' + req.url.slice(urlPath.length);
-            }
-          }
-        }
+        const rewritten = barePathRewrite(req.url, __dirname);
+        if (rewritten) req.url = rewritten;
         next();
       });
     },
@@ -104,20 +115,33 @@ const APP_VERSION = resolveAppVersion();
  * empty. The droplet's Caddyfile carves the same exception out ahead of its
  * own proxy; this keeps `npm run preview` honest about what a demo host does.
  *
+ * Also resolves bare paths to their index.html, which the dev server does via
+ * `configureServer` and a preview server otherwise does not — so the demo's
+ * own menu link to /classes answered 404 while /classes/ worked.
+ *
  * Installed in the hook body rather than a returned callback, so it runs
  * before Vite's internal proxy rather than after it.
  */
-function previewCatalogMiddleware(): PluginOption {
+function previewMiddleware(): PluginOption {
+  const out = resolve(__dirname, 'out');
   return {
-    name: 'preview-catalog-middleware',
+    name: 'preview-middleware',
     configurePreviewServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = req.url?.split('?')[0] ?? '';
+
+        const rewritten = barePathRewrite(req.url, out);
+        if (rewritten) {
+          req.url = rewritten;
+          next();
+          return;
+        }
+
         if (!/^\/cache\/calendar-cache\/classes-\d{4}\.json$/.test(path)) {
           next();
           return;
         }
-        const file = resolve(__dirname, 'out', path.replace(/^\//, ''));
+        const file = resolve(out, path.replace(/^\//, ''));
         if (!existsSync(file)) {
           // Say which file is missing rather than letting it fall through to
           // the proxy, which answers with an S3 error that explains nothing.
@@ -163,7 +187,7 @@ const backendProxy = {
 export default defineConfig({
   appType: 'mpa',
   plugins: [
-    devServerMiddleware(), previewCatalogMiddleware(), preact(),
+    devServerMiddleware(), previewMiddleware(), preact(),
     emitVersionJson(APP_VERSION), emitSitemapXml(),
   ],
   define: {
