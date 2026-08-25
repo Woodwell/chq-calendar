@@ -330,44 +330,39 @@ describe('ClassesPage', () => {
     expect(screen.queryByText(/Sessions: \$145/)).not.toBeInTheDocument();
   });
 
-  it('expands a long filter group and collapses it again', async () => {
-    // Nine venues, one over the threshold, so the group starts collapsed.
+  it('folds a long group into a disclosure, like the calendar does', async () => {
     const venues = Array.from({ length: 9 }, (_, i) => `Venue ${i + 1}`);
     useClassData.mockReturnValue(loaded(venues.map((v, i) => makeClass({
       id: `CHQ.EVN${i}`, title: `Class ${i}`, venues: [v],
     }))));
-    render(<ClassesPage />);
+    const { container } = render(<ClassesPage />);
     await openFilters();
 
-    const toggle = () => screen.getByRole('button', { name: /Show all 9|Show fewer/ });
-    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('button', { name: 'Venue 1' })).not.toBeInTheDocument();
-
-    fireEvent.click(toggle());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Venue 1' })).toBeInTheDocument());
-    // The way back out has to survive expanding, which is where it went
-    // missing: with everything shown, nothing is hidden.
-    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
-
-    fireEvent.click(toggle());
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Venue 1' })).not.toBeInTheDocument());
+    const section = [...container.querySelectorAll('details')]
+      .find((d) => /Venue/.test(d.querySelector('summary')?.textContent ?? ''));
+    expect(section).toBeTruthy();
+    // Starts closed, and says nothing is picked yet.
+    expect(section!.open).toBe(false);
+    expect(section!.querySelector('summary')!.textContent).not.toMatch(/selected/);
   });
 
-  it('keeps a selected option visible when the group is collapsed', async () => {
+  it('shows what is picked on the summary row, so a collapsed filter is still visible', async () => {
     const venues = Array.from({ length: 9 }, (_, i) => `Venue ${i + 1}`);
     useClassData.mockReturnValue(loaded(venues.map((v, i) => makeClass({
       id: `CHQ.EVN${i}`, title: `Class ${i}`, venues: [v],
     }))));
-    render(<ClassesPage />);
+    const { container } = render(<ClassesPage />);
     await openFilters();
 
-    fireEvent.click(screen.getByRole('button', { name: /Show all 9/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Venue 3' }));
-    fireEvent.click(screen.getByRole('button', { name: /Show fewer/ }));
 
-    // A filter you cannot see is a filter you cannot undo.
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Venue 1' })).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Venue 3' })).toBeInTheDocument();
+    const summary = [...container.querySelectorAll('details')]
+      .map((d) => d.querySelector('summary')!)
+      .find((el) => /Venue/.test(el.textContent ?? ''))!;
+    await waitFor(() => expect(summary.textContent).toMatch(/\(1 selected\)/));
+    // The chosen tag itself rides along, so it can be unpicked without
+    // opening the section.
+    expect(summary.querySelector('button')!.textContent).toBe('Venue 3');
   });
 
   it('filters by venue', async () => {
