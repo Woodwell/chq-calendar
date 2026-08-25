@@ -31,7 +31,7 @@ import {
   scheduledMatches,
   sessionMatches,
 } from '@/lib/utils/classFilterHelpers';
-import { chqDayKey } from '@/lib/utils/chqTime';
+import { chqNowLocal } from '@/lib/utils/chqTime';
 
 const CATALOG_URL =
   'https://tickets.chq.org/searchclasses.html?subjectParentCat=L2_CC_SUB&weekParentCat=SEAS_WKS';
@@ -77,10 +77,11 @@ export default function ClassesPage() {
   // ground as the Spots picker, which says the same thing better — Open and
   // Waitlist both require a live session, so either one narrows to what can
   // actually be joined.
-  // The Institution's today, read once. The ticket site keeps a session
-  // listed for a few days after it runs — seven were still showing live spot
-  // counts three days on — so the clock decides what is past, not the listing.
-  const todayKey = chqDayKey(new Date());
+  // The Institution's clock, read once. The ticket site keeps a session
+  // listed for days after it runs — seven were still showing live spot counts
+  // three days on — so the clock decides what is past, not the listing. Time
+  // as well as date: at nine in the morning, a class at four has not started.
+  const nowLocal = chqNowLocal(new Date());
   const inScope = classes;
 
   // Drawn from what is in scope, so hiding finished classes also drops the
@@ -89,8 +90,8 @@ export default function ClassesPage() {
   const venues = useMemo(() => availableVenues(inScope), [inScope]);
 
   const visible = useMemo(
-    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(byLifecycle(todayKey)),
-    [inScope, options, filtering, todayKey],
+    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(byLifecycle(nowLocal)),
+    [inScope, options, filtering, nowLocal],
   );
   // The two groups worth a number: what has not begun, and what is under
   // way. "Still running" covered both and so answered neither — a class that
@@ -99,12 +100,12 @@ export default function ClassesPage() {
     let upcoming = 0;
     let running = 0;
     for (const c of visible) {
-      const stage = classLifecycle(c, todayKey);
+      const stage = classLifecycle(c, nowLocal);
       if (stage === 'upcoming') upcoming++;
       else if (stage === 'running') running++;
     }
     return { upcoming, running };
-  }, [visible, todayKey]);
+  }, [visible, nowLocal]);
 
   const toggleDescription = (classId: string) => {
     setExpanded((prev) => {
@@ -270,7 +271,7 @@ export default function ClassesPage() {
                     isFavorite={favorites.isFavorite}
                     onToggleFavorite={favorites.toggleFavorite}
                     selectedWeeks={options.selectedWeeks}
-                    todayKey={todayKey}
+                    nowLocal={nowLocal}
                     scheduledMatches={dimming
                       ? (w: ScheduledWeek) => scheduledMatches(chqClass.id, w, options)
                       : undefined}

@@ -99,6 +99,21 @@ export function chqDayKey(d: Date): string {
 }
 
 /**
+ * Now, in the same shape the feeds write their datetimes: naive
+ * Institution-local, "2026-08-26 16:30:00".
+ *
+ * Both feeds store wall-clock time with a separate timezone field, so a
+ * string comparison against this is a comparison in Institution time — which
+ * is the only comparison that means anything for a class held there. Reading
+ * a day key instead answers a question about the date, not the moment: a
+ * class starting at four is not under way at nine in the morning.
+ */
+export function chqNowLocal(d: Date): string {
+  const { year, month, day, hour, minute, second } = chqParts(d);
+  return `${year}-${pad2(month)}-${pad2(day)} ${pad2(hour)}:${pad2(minute)}:${pad2(second)}`;
+}
+
+/**
  * The instant at which the Chautauqua clock reads the given wall time.
  *
  * Offset-lookup-and-correct, applied twice. A single correction is wrong

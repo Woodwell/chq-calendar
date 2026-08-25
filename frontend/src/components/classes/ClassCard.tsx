@@ -240,10 +240,10 @@ interface ClassCardProps {
    */
   selectedWeeks?: number[];
   /**
-   * The Institution's date, YYYY-MM-DD. Supplied by the caller so it is read
-   * once per render rather than once per session row.
+   * The Institution's clock as a naive local datetime, supplied by the caller
+   * so it is read once per render rather than once per session row.
    */
-  todayKey?: string;
+  nowLocal?: string;
 }
 
 /**
@@ -280,14 +280,14 @@ function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
 }
 
 /** Whether a row is finished: no session left, or one that has already run. */
-export function isRowPast(row: ScheduleRow, todayKey?: string): boolean {
+export function isRowPast(row: ScheduleRow, nowLocal?: string): boolean {
   if (!row.session) return true;
-  return todayKey ? isSessionOver(row.session, todayKey) : false;
+  return nowLocal ? isSessionOver(row.session, nowLocal) : false;
 }
 
 export function ClassCard({
   chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite,
-  sessionMatches, scheduledMatches, selectedWeeks = [], todayKey,
+  sessionMatches, scheduledMatches, selectedWeeks = [], nowLocal,
 }: ClassCardProps) {
   const rows = scheduleRows(chqClass, selectedWeeks);
   const [showPast, setShowPast] = useState(false);
@@ -298,7 +298,7 @@ export function ClassCard({
   const isStarred = (row: ScheduleRow) => isFavorite(
     classWeekKey(chqClass.id, row.session ? row.session.week : row.scheduled.week),
   );
-  const past = rows.filter((r) => isRowPast(r, todayKey) && !isStarred(r));
+  const past = rows.filter((r) => isRowPast(r, nowLocal) && !isStarred(r));
   const kept = rows.filter((r) => !past.includes(r));
 
   return (
@@ -367,7 +367,7 @@ export function ClassCard({
                 session={row.session}
                 classId={chqClass.id}
                 registerUrl={chqClass.sourceUrl}
-                isOver={todayKey ? isSessionOver(row.session, todayKey) : false}
+                isOver={nowLocal ? isSessionOver(row.session, nowLocal) : false}
                 isFavorite={isFavorite(classWeekKey(chqClass.id, row.session.week))}
                 onToggleFavorite={onToggleFavorite}
                 matches={sessionMatches ? sessionMatches(row.session) : true}

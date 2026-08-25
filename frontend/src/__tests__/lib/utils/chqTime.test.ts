@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CHQ_ZONE, chqParts, chqDayKey, chqDateAt, parseEventDate,
+  CHQ_ZONE, chqParts, chqDayKey, chqNowLocal, chqDateAt, parseEventDate,
   formatChqTime, formatChqDayLabel,
 } from '@/lib/utils/chqTime';
 import { startOfDay, dayAfter, windowContains } from '@/lib/utils/dayWindow';
@@ -38,6 +38,26 @@ describe('chqDayKey', () => {
 
   it('zero-pads to yyyy-mm-dd', () => {
     expect(chqDayKey(new Date('2026-01-05T17:00:00Z'))).toBe('2026-01-05');
+  });
+});
+
+describe('chqNowLocal', () => {
+  it('writes the instant the way the feeds write their datetimes', () => {
+    // Naive Institution-local, so it compares as a string against a session's
+    // startDate without either side needing to be parsed.
+    expect(chqNowLocal(new Date('2026-08-25T12:20:10Z'))).toBe('2026-08-25 08:20:10');
+    expect(chqNowLocal(new Date('2026-07-27T03:45:00Z'))).toBe('2026-07-26 23:45:00');
+  });
+
+  it('zero-pads every field', () => {
+    expect(chqNowLocal(new Date('2026-01-05T14:05:09Z'))).toBe('2026-01-05 09:05:09');
+  });
+
+  it('sorts correctly against a session datetime', () => {
+    const now = chqNowLocal(new Date('2026-08-25T12:20:00Z')); // 08:20 in CHQ
+    // A class this afternoon has not started; one that ended this morning has.
+    expect(now < '2026-08-25 13:00:00').toBe(true);
+    expect(now > '2026-08-25 08:00:00').toBe(true);
   });
 });
 

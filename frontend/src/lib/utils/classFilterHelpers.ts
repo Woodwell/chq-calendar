@@ -209,11 +209,15 @@ export function scheduledMatches(
  * the listing alone therefore offers people a Register button for a class
  * that already happened, so the clock gets the final say on what is past.
  *
- * `todayKey` is passed in rather than read here so the caller reads the
- * Institution's date once, and so tests are not at the mercy of the clock.
+ * Compared as a full local datetime: a session that finished at half past
+ * ten this morning is over by lunchtime, and one starting at four this
+ * afternoon has not run yet.
+ *
+ * `nowLocal` is passed in rather than read here so the caller reads the
+ * Institution's clock once, and so tests are not at the mercy of it.
  */
-export function isSessionOver(session: ClassSession, todayKey: string): boolean {
-  return session.endDate.slice(0, 10) < todayKey;
+export function isSessionOver(session: ClassSession, nowLocal: string): boolean {
+  return session.endDate < nowLocal;
 }
 
 /**
@@ -226,15 +230,19 @@ export function isSessionOver(session: ClassSession, todayKey: string): boolean 
  */
 export type ClassLifecycle = 'upcoming' | 'running' | 'ended';
 
-export function classLifecycle(chqClass: ChqClass, todayKey: string): ClassLifecycle {
+export function classLifecycle(chqClass: ChqClass, nowLocal: string): ClassLifecycle {
   // No session left to speak of. The catalog may still describe it, but
   // nothing about it is ahead of us.
   if (chqClass.sessions.length === 0) return 'ended';
 
-  const starts = chqClass.sessions.map((sn) => sn.startDate.slice(0, 10)).sort();
-  const ends = chqClass.sessions.map((sn) => sn.endDate.slice(0, 10)).sort();
-  if (todayKey < starts[0]) return 'upcoming';
-  if (todayKey > ends[ends.length - 1]) return 'ended';
+  // Compared as full local datetimes, not day keys. On a date alone a class
+  // starting at four in the afternoon reads as under way all morning, and one
+  // that finished at half past ten reads as under way until midnight — both
+  // of which are wrong at the moment somebody is looking.
+  const starts = chqClass.sessions.map((sn) => sn.startDate).sort();
+  const ends = chqClass.sessions.map((sn) => sn.endDate).sort();
+  if (nowLocal < starts[0]) return 'upcoming';
+  if (nowLocal > ends[ends.length - 1]) return 'ended';
   return 'running';
 }
 
@@ -247,7 +255,7 @@ const LIFECYCLE_ORDER: Record<ClassLifecycle, number> = { upcoming: 0, running: 
  * what starts soonest, what ends soonest, and — for history — what happened
  * most recently, which is what someone scrolling back is looking for.
  */
-export function byLifecycle(todayKey: string) {
+export function byLifecycle(nowLocal: string) {
   const firstStart = (c: ChqClass) =>
     c.sessions.reduce<string | null>((min, sn) => (min === null || sn.startDate < min ? sn.startDate : min), null);
   const lastEnd = (c: ChqClass) =>
@@ -255,8 +263,8 @@ export function byLifecycle(todayKey: string) {
   const lastWeek = (c: ChqClass) => (c.weeks ?? []).reduce((m, w) => (w > m ? w : m), 0);
 
   return (a: ChqClass, b: ChqClass): number => {
-    const la = classLifecycle(a, todayKey);
-    const lb = classLifecycle(b, todayKey);
+    const la = classLifecycle(a, nowLocal);
+    const lb = classLifecycle(b, nowLocal);
     if (la !== lb) return LIFECYCLE_ORDER[la] - LIFECYCLE_ORDER[lb];
 
     if (la === 'upcoming') {
@@ -284,8 +292,8 @@ export function byLifecycle(todayKey: string) {
 }
 
 /** Sessions that have not finished yet — what "still running" actually means. */
-export function upcomingSessions(chqClass: ChqClass, todayKey: string): ClassSession[] {
-  return chqClass.sessions.filter((s) => !isSessionOver(s, todayKey));
+export function upcomingSessions(chqClass: ChqClass, nowLocal: string): ClassSession[] {
+  return chqClass.sessions.filter((s) => !isSessionOver(s, nowLocal));
 }
 
 /** Whether the class is scheduled in any of the weeks asked for. */
