@@ -139,10 +139,20 @@ describe('filterClasses', () => {
       expect(pick(past({ startTime: '7:00 PM' }), { timeOfDay: 'evening' })).toBe(1);
     });
 
+    it('answers the favourites filter, since the star is keyed on the week', () => {
+      const c = past();
+      const starred = { ...EMPTY_CLASS_FILTERS, selectedWeeks: [2],
+        showFavoritesOnly: true, favoriteIds: new Set(['class:past:week2']) };
+      expect(filterClasses([c], starred)).toHaveLength(1);
+      const other = { ...starred, favoriteIds: new Set(['class:past:week3']) };
+      expect(filterClasses([c], other)).toHaveLength(0);
+    });
+
     it('still refuses the questions only a crawl could answer', () => {
-      // No spot count and no session id ever existed for a finished week.
+      // No spot count ever existed for a finished week, and the catalog
+      // never knew one. Favourites are fine — see above.
       expect(pick(past(), { availability: 'open' })).toBe(0);
-      expect(pick(past(), { showFavoritesOnly: true })).toBe(0);
+      expect(pick(past(), { availability: 'waitlist' })).toBe(0);
     });
 
     it('answers only the week when there is no printed schedule at all', () => {
@@ -265,14 +275,16 @@ describe('filterClasses', () => {
     })).toHaveLength(0);
   });
 
-  it('filters to starred sessions by their namespaced key', () => {
+  it('filters to starred weeks by their namespaced key', () => {
     const options = {
       ...EMPTY_CLASS_FILTERS,
       showFavoritesOnly: true,
-      favoriteIds: new Set(['class:a:p2']),
+      // Keyed on the week, so the star outlives the session the ticket site
+      // drops the moment that week ends.
+      favoriteIds: new Set(['class:a:week9']),
     };
     expect(filterClasses(classes, options).map(c => c.id)).toEqual(['a']);
-    // The same performance under a different class is a different favorite.
+    // The same week under a different class is a different favorite.
     expect(sessionMatches('b', waitlist9Fri, options)).toBe(false);
   });
 });

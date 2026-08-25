@@ -1,5 +1,5 @@
 import type { ChqClass, ClassProvenance, ClassSession, ScheduledWeek } from '@/lib/classTypes';
-import { classSessionKey } from '@/lib/classTypes';
+import { classWeekKey } from '@/lib/classTypes';
 import { isSessionOver } from '@/lib/utils/classFilterHelpers';
 
 /**
@@ -25,14 +25,50 @@ function availabilityLabel(session: ClassSession): { text: string; className: st
 }
 
 /**
+ * The star for one week of a class.
+ *
+ * Shared by both kinds of row, and keyed on the week, so a class the ticket
+ * site has stopped listing can still be starred from its printed schedule —
+ * which is most of the catalog by late August.
+ */
+function FavoriteStar({ week, isFavorite, onToggle }: {
+  week: number;
+  isFavorite: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`p-1 rounded-full transition-colors shrink-0 ${
+        isFavorite ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-400'
+      }`}
+      title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      aria-label={`${isFavorite ? 'Remove' : 'Add'} Week ${week} ${isFavorite ? 'from' : 'to'} favorites`}
+    >
+      <svg className="w-4 h-4" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+      </svg>
+    </button>
+  );
+}
+
+/**
  * A week the class was scheduled for, which the ticket site no longer lists.
  *
  * Shown from the printed catalog so that filtering to a week already past
- * still produces a card that talks about that week. It offers no spot count,
- * no star and no register link — none of those mean anything for a week that
- * is over, and a star needs a session id the catalog does not have.
+ * still produces a card that talks about that week. It offers no spot count
+ * and no register link, because neither means anything once the week is over
+ * — but it can still be starred, since the star is keyed on the week rather
+ * than on a session id the catalog never had.
  */
-function ScheduledRow({ scheduled, matches }: { scheduled: ScheduledWeek; matches: boolean }) {
+function ScheduledRow({ scheduled, classId, isFavorite, onToggleFavorite, matches }: {
+  scheduled: ScheduledWeek;
+  classId: string;
+  isFavorite: boolean;
+  onToggleFavorite: (key: string) => void;
+  matches: boolean;
+}) {
   const place = [scheduled.location, scheduled.room].filter(Boolean).join(' ');
   const time = scheduled.startTime && scheduled.endTime
     ? `${scheduled.startTime} - ${scheduled.endTime}`
@@ -42,8 +78,11 @@ function ScheduledRow({ scheduled, matches }: { scheduled: ScheduledWeek; matche
     <li className={`flex items-start gap-2 py-2 border-t border-gray-100 dark:border-gray-700 first:border-t-0 ${
       matches ? '' : 'opacity-40'
     }`}>
-      {/* Keeps the text aligned with the starred rows above and below. */}
-      <span className="w-6 shrink-0" aria-hidden="true" />
+      <FavoriteStar
+        week={scheduled.week}
+        isFavorite={isFavorite}
+        onToggle={() => onToggleFavorite(classWeekKey(classId, scheduled.week))}
+      />
 
       <div className="flex-1 min-w-0 text-sm">
         <div className="text-gray-900 dark:text-gray-100">
@@ -83,25 +122,13 @@ function SessionRow({ session, classId, registerUrl, isOver, isFavorite, onToggl
   const badge = isOver
     ? { text: 'Over', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' }
     : availabilityLabel(session);
-  const key = classSessionKey(classId, session.performanceId);
+  const key = classWeekKey(classId, session.week);
 
   return (
     <li className={`flex items-start gap-2 py-2 border-t border-gray-100 dark:border-gray-700 first:border-t-0 ${
       matches ? '' : 'opacity-40'
     }`}>
-      <button
-        type="button"
-        onClick={() => onToggleFavorite(key)}
-        className={`p-1 rounded-full transition-colors shrink-0 ${
-          isFavorite ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-400'
-        }`}
-        title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-        aria-label={`${isFavorite ? 'Remove' : 'Add'} Week ${session.week} session ${isFavorite ? 'from' : 'to'} favorites`}
-      >
-        <svg className="w-4 h-4" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-        </svg>
-      </button>
+      <FavoriteStar week={session.week} isFavorite={isFavorite} onToggle={() => onToggleFavorite(key)} />
 
       <div className="flex-1 min-w-0 text-sm">
         <div className="text-gray-900 dark:text-gray-100">
@@ -306,7 +333,7 @@ export function ClassCard({
                 classId={chqClass.id}
                 registerUrl={chqClass.sourceUrl}
                 isOver={todayKey ? isSessionOver(row.session, todayKey) : false}
-                isFavorite={isFavorite(classSessionKey(chqClass.id, row.session.performanceId))}
+                isFavorite={isFavorite(classWeekKey(chqClass.id, row.session.week))}
                 onToggleFavorite={onToggleFavorite}
                 matches={sessionMatches ? sessionMatches(row.session) : true}
               />
@@ -314,6 +341,9 @@ export function ClassCard({
               <ScheduledRow
                 key={`week-${row.scheduled.week}`}
                 scheduled={row.scheduled}
+                classId={chqClass.id}
+                isFavorite={isFavorite(classWeekKey(chqClass.id, row.scheduled.week))}
+                onToggleFavorite={onToggleFavorite}
                 matches={scheduledMatches ? scheduledMatches(row.scheduled) : true}
               />
             )))}

@@ -1,5 +1,5 @@
 import type { ChqClass, ClassSession, ScheduledWeek } from '@/lib/classTypes';
-import { classSessionKey } from '@/lib/classTypes';
+import { classWeekKey } from '@/lib/classTypes';
 
 export type AvailabilityFilter = 'all' | 'open' | 'waitlist';
 export type TimeOfDay = 'all' | 'morning' | 'afternoon' | 'evening';
@@ -84,7 +84,7 @@ export function sessionMatches(
   if (options.timeOfDay !== 'all' && getTimeBucket(session.startDate) !== options.timeOfDay) return false;
   if (
     options.showFavoritesOnly &&
-    !options.favoriteIds.has(classSessionKey(classId, session.performanceId))
+    !options.favoriteIds.has(classWeekKey(classId, session.week))
   ) return false;
   return true;
 }
@@ -152,13 +152,16 @@ export function scheduledTimeBucket(scheduled: ScheduledWeek): Exclude<TimeOfDay
 /**
  * Filters no source but the crawl can answer.
  *
- * Availability and favourites are facts about a specific session: how full a
- * class was is something only a crawl could have seen, and a favourite is
- * keyed on a session id the catalog does not have. A week already past has
- * neither, so asking for them is asking for nothing.
+ * Just availability. How full a class was is something only a crawl could
+ * ever have seen, and the printed catalog never knew it — so a finished week
+ * has no answer and must not appear to.
+ *
+ * Favourites used to be here too, back when a star was keyed on the ticket
+ * site's session id. It is keyed on the week now, so the printed schedule can
+ * answer it perfectly well.
  */
 export function hasCrawlOnlyFilters(options: ClassFilterOptions): boolean {
-  return options.availability !== 'all' || options.showFavoritesOnly;
+  return options.availability !== 'all';
 }
 
 /**
@@ -169,7 +172,11 @@ export function hasCrawlOnlyFilters(options: ClassFilterOptions): boolean {
  * in the catalog, so a finished week can answer them exactly as a live
  * session would.
  */
-export function scheduledMatches(scheduled: ScheduledWeek, options: ClassFilterOptions): boolean {
+export function scheduledMatches(
+  classId: string,
+  scheduled: ScheduledWeek,
+  options: ClassFilterOptions,
+): boolean {
   if (options.selectedWeeks.length > 0 && !options.selectedWeeks.includes(scheduled.week)) return false;
   if (
     options.selectedDays.length > 0 &&
@@ -184,6 +191,10 @@ export function scheduledMatches(scheduled: ScheduledWeek, options: ClassFilterO
     // An unreadable printed time cannot claim to be in any bucket.
     if (bucket !== options.timeOfDay) return false;
   }
+  if (
+    options.showFavoritesOnly &&
+    !options.favoriteIds.has(classWeekKey(classId, scheduled.week))
+  ) return false;
   return true;
 }
 
@@ -264,7 +275,7 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
     if (hasCrawlOnlyFilters(options)) return false;
 
     const printed = c.scheduledWeeks ?? [];
-    if (printed.length > 0) return printed.some((w) => scheduledMatches(w, options));
+    if (printed.length > 0) return printed.some((w) => scheduledMatches(c.id, w, options));
 
     // No printed schedule either: a listing the catalog never covered, or a
     // file published before the field existed. The week is then genuinely all

@@ -129,8 +129,19 @@ export interface ClassesFile {
   classes: ChqClass[];
 }
 
-/** The favorite key for one session. Namespaced so it cannot collide with
- *  event ids, which share the same localStorage set. */
-export function classSessionKey(classId: string, performanceId: string): string {
-  return `class:${classId}:${performanceId}`;
+/**
+ * The favorite key for one week of one class.
+ *
+ * Keyed on the week rather than the ticket site's session id, because the
+ * session id does not outlive the session: the site drops a session once its
+ * week ends, and a star hung on that id would vanish with it. The week is
+ * stable — no class in the catalog runs twice in the same week — so a starred
+ * week stays starred whether the crawl can still see it or the printed
+ * schedule is all that is left.
+ *
+ * Namespaced so it cannot collide with event ids, which share the same
+ * localStorage set.
+ */
+export function classWeekKey(classId: string, week: number): string {
+  return `class:${classId}:week${week}`;
 }

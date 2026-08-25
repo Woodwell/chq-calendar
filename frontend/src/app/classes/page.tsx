@@ -283,7 +283,7 @@ export default function ClassesPage() {
                     selectedWeeks={options.selectedWeeks}
                     todayKey={todayKey}
                     scheduledMatches={dimming
-                      ? (w: ScheduledWeek) => scheduledMatches(w, options)
+                      ? (w: ScheduledWeek) => scheduledMatches(chqClass.id, w, options)
                       : undefined}
                     sessionMatches={dimming
                       ? (sx: ClassSession) => sessionMatches(chqClass.id, sx, options)

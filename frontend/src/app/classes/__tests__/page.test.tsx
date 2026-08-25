@@ -228,6 +228,28 @@ describe('ClassesPage', () => {
     expect(screen.getByText('12 spots left')).toBeInTheDocument();
   });
 
+  it('stars a week the ticket site has stopped listing', async () => {
+    // A Masters Series masterclass whose week is over: still a real class
+    // with a real schedule, and 377 of the catalog look like this in late
+    // August. Keying the star on the session id made all of them unstarrable.
+    useClassData.mockReturnValue(loaded([makeClass({
+      id: 'CHQ.EVN1908', title: 'Masters Series Culinary Masterclass',
+      sessions: [], weeks: [8],
+      scheduledWeeks: [{
+        week: 8, daysOfWeek: ['Thursday'], startTime: '4:00 PM', endTime: '6:00 PM',
+        location: 'Athenaeum Hotel', room: '',
+      }],
+    })]));
+    render(<ClassesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem('chq-calendar-favorites') ?? '{}');
+      expect(stored.eventIds).toEqual(['class:CHQ.EVN1908:week8']);
+    });
+  });
+
   it('narrows to what can still be joined through the Spots picker', async () => {
     useClassData.mockReturnValue(loaded([makeClass(), makeClass({
       id: 'CHQ.EVN9', title: 'Finished Class', sessions: [], weeks: [2],
@@ -243,17 +265,19 @@ describe('ClassesPage', () => {
     expect(screen.getByText('Watercolors for Beginners')).toBeInTheDocument();
   });
 
-  it('stars a single session, under a key that cannot collide with an event', async () => {
+  it('stars a single week, under a key that cannot collide with an event', async () => {
     useClassData.mockReturnValue(loaded([makeClass()]));
     render(<ClassesPage />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 session to favorites/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
 
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem('chq-calendar-favorites') ?? '{}');
       // Favorites are one flat set shared with the calendar, so the class
-      // prefix is what keeps a session from colliding with an event id.
-      expect(stored.eventIds).toEqual(['class:CHQ.EVN1:CHQ.EVN1.PRF1']);
+      // prefix is what keeps a week from colliding with an event id. The week
+      // rather than the session id, so the star survives the site dropping
+      // that session once the week is over.
+      expect(stored.eventIds).toEqual(['class:CHQ.EVN1:week8']);
     });
   });
 
