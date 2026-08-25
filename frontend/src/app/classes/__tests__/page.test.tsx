@@ -20,6 +20,7 @@ const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   id: 'CHQ.EVN1',
   title: 'Watercolors for Beginners',
   catalogId: null,
+  weeks: [8],
   materials: null,
   fee: null,
   room: null,

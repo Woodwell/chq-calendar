@@ -89,6 +89,14 @@ export interface ChqClass {
   fee: string | null;
   /** Room within `location`, which the ticket site runs into one string. */
   room: string | null;
+  /**
+   * Every season week the class is scheduled for, ascending.
+   *
+   * Not the same as the weeks in `sessions`: the ticket site drops a session
+   * once its week is over, so a listed class shows only what is still to
+   * come. This is the whole schedule, remembered by the printed catalog.
+   */
+  weeks: number[];
   provenance: ClassProvenance;
   description: string;
   sessions: ClassSession[];

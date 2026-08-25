@@ -91,14 +91,44 @@ export function sessionMatches(
 
 /** Whether any filter that applies to a *session* is active. */
 export function hasSessionFilters(options: ClassFilterOptions): boolean {
+  return options.selectedWeeks.length > 0 || hasNonWeekSessionFilters(options);
+}
+
+/**
+ * Session filters other than week.
+ *
+ * Week is separated out because it is the one session property the catalog
+ * also knows, so it can still be answered for a class whose sessions are
+ * gone. Availability, day, time and favourites cannot: they are facts about
+ * a specific session, and a class with none has no answer to give.
+ */
+export function hasNonWeekSessionFilters(options: ClassFilterOptions): boolean {
   return (
     options.availability !== 'all' ||
-    options.selectedWeeks.length > 0 ||
     options.selectedDays.length > 0 ||
     options.meetingDays.length > 0 ||
     options.timeOfDay !== 'all' ||
     options.showFavoritesOnly
   );
+}
+
+/**
+ * The weeks a class is scheduled for.
+ *
+ * Falls back to the weeks its sessions cover when `weeks` is absent, which
+ * happens with a catalog file published before the field existed — those sit
+ * in CDN and browser caches for a while after a deploy, and a page that
+ * throws on one is worse than a page that offers slightly fewer weeks.
+ */
+export function weeksOf(chqClass: ChqClass): number[] {
+  if (Array.isArray(chqClass.weeks)) return chqClass.weeks;
+  return [...new Set((chqClass.sessions ?? []).map((s) => s.week))].sort((a, b) => a - b);
+}
+
+/** Whether the class is scheduled in any of the weeks asked for. */
+export function matchesWeeks(chqClass: ChqClass, selectedWeeks: number[]): boolean {
+  if (selectedWeeks.length === 0) return true;
+  return weeksOf(chqClass).some((w) => selectedWeeks.includes(w));
 }
 
 /** Title or instructor, case-insensitive. Both are what people search by. */
@@ -130,14 +160,25 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
   // set. A class whose sessions have all passed has none to match, so an
   // unconditional `.some()` would drop every finished class the moment
   // someone typed a search term.
+  const byOtherSession = hasNonWeekSessionFilters(options);
   const bySession = hasSessionFilters(options);
   return classes.filter((c) => {
     if (!matchesSearch(c, term)) return false;
     // Category is a property of the class, not of a session, so it joins the
     // search rather than the per-session conjunction.
     if (categories.length > 0 && !c.categories.some((k) => categories.includes(k))) return false;
-    if (bySession && !c.sessions.some((s) => sessionMatches(c.id, s, options))) return false;
-    return true;
+    if (!bySession) return true;
+
+    // With sessions, the conjunction is resolved per session as before, which
+    // is what keeps "Monday" and "evening" meaning one Monday evening.
+    if (c.sessions.length > 0 && c.sessions.some((s) => sessionMatches(c.id, s, options))) return true;
+
+    // Without a session in scope the only session property still answerable
+    // is the week, from the schedule the catalog printed. That is what makes
+    // a week already past filterable at all — but it is also all we know, so
+    // any other session filter has to fail rather than be waved through.
+    if (byOtherSession) return false;
+    return matchesWeeks(c, options.selectedWeeks);
   });
 }
 
@@ -164,10 +205,20 @@ export function activeFilterCount(options: ClassFilterOptions): number {
   );
 }
 
-/** The weeks that actually have sessions, so the picker offers only real ones. */
+/**
+ * Every week the catalog schedules something in, not only those with sessions
+ * still to come.
+ *
+ * Reading this off sessions alone made the picker shrink as the season went
+ * on — by late August it offered week 9 and nothing else, so the history now
+ * in the data was unreachable.
+ */
 export function availableWeeks(classes: ChqClass[]): number[] {
   const weeks = new Set<number>();
-  for (const c of classes) for (const s of c.sessions) weeks.add(s.week);
+  for (const c of classes) {
+    for (const w of weeksOf(c)) weeks.add(w);
+    for (const s of c.sessions) weeks.add(s.week);
+  }
   return [...weeks].sort((a, b) => a - b);
 }
 

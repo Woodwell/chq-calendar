@@ -32,6 +32,7 @@ const chqClass = (id: string, sessions: ClassSession[]): ChqClass => ({
   id,
   title: id,
   catalogId: null,
+  weeks: [8],
   materials: null,
   fee: null,
   room: null,
@@ -100,6 +101,69 @@ describe('filterClasses', () => {
       .toEqual(['a', 'b']);
     expect(filterClasses(classes, { ...EMPTY_CLASS_FILTERS, selectedDays: ['Monday'] }).map(c => c.id))
       .toEqual(['a']);
+  });
+
+  it('finds a class by a week whose sessions the site has already dropped', () => {
+    // The whole point of keeping history: week 3 is long past, so the ticket
+    // site lists no session for it, but the printed catalog remembers that
+    // this class ran then.
+    const past = chqClass('past', []);
+    past.weeks = [3];
+    expect(filterClasses([past], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [3] }).map(c => c.id))
+      .toEqual(['past']);
+    expect(filterClasses([past], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [4] })).toEqual([]);
+  });
+
+  it('will not answer a session question for a class with no sessions', () => {
+    // It ran in week 3 and we know nothing else about it. Asking for week 3
+    // *and* Monday morning is a question only a session can answer, so this
+    // must drop out rather than be waved through on the week alone.
+    const past = chqClass('past', []);
+    past.weeks = [3];
+    expect(filterClasses([past], {
+      ...EMPTY_CLASS_FILTERS, selectedWeeks: [3], selectedDays: ['Monday'],
+    })).toEqual([]);
+    expect(filterClasses([past], {
+      ...EMPTY_CLASS_FILTERS, selectedWeeks: [3], availability: 'open',
+    })).toEqual([]);
+  });
+
+  it('still resolves week against the session when there is one', () => {
+    // A listed class whose catalog schedule spans weeks 3 and 9, but which
+    // only has a week 9 session left. Week 3 comes from the schedule; week 9
+    // from the session, and pairs precisely with its day.
+    const spanning = chqClass('spanning', [session({ week: 9, daysOfWeek: ['Tuesday'] })]);
+    spanning.weeks = [3, 9];
+    expect(filterClasses([spanning], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [3] }).map(c => c.id))
+      .toEqual(['spanning']);
+    // Week 9 has a session, so day still has to agree with it.
+    expect(filterClasses([spanning], {
+      ...EMPTY_CLASS_FILTERS, selectedWeeks: [9], selectedDays: ['Tuesday'],
+    }).map(c => c.id)).toEqual(['spanning']);
+    expect(filterClasses([spanning], {
+      ...EMPTY_CLASS_FILTERS, selectedWeeks: [9], selectedDays: ['Monday'],
+    })).toEqual([]);
+  });
+
+  it('survives a catalog published before weeks existed', () => {
+    // Old files sit in CDN and browser caches for a while after a deploy.
+    // Falling back to the session weeks costs a little history; throwing
+    // would cost the whole page.
+    const legacy = chqClass('legacy', [session({ week: 9 })]);
+    delete (legacy as Partial<ChqClass>).weeks;
+
+    expect(availableWeeks([legacy])).toEqual([9]);
+    expect(filterClasses([legacy], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [9] }).map(c => c.id))
+      .toEqual(['legacy']);
+    expect(filterClasses([legacy], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [3] })).toEqual([]);
+  });
+
+  it('offers every scheduled week, not only those with sessions left', () => {
+    const finished = chqClass('finished', []);
+    finished.weeks = [1, 2];
+    const running = chqClass('running', [session({ week: 9 })]);
+    running.weeks = [9];
+    expect(availableWeeks([finished, running])).toEqual([1, 2, 9]);
   });
 
   it('requires one session to satisfy every filter at once', () => {

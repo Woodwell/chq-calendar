@@ -161,6 +161,27 @@ describe('mergeCatalog', () => {
     expect(gone.categories).toEqual(['Art']);
   });
 
+  it('keeps the weeks the site has forgotten, so history stays filterable', () => {
+    // The catalog schedules weeks 3 and 9; the site has dropped week 3 now
+    // that it is over and lists only the week 9 session. Both must survive,
+    // or a week already past becomes unreachable.
+    const { classes } = mergeCatalog({
+      catalog: [catalogClass({ weeks: [3, 9] })],
+      listed: [crawled({ sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].weeks).toEqual([3, 9]);
+  });
+
+  it('falls back to the crawl for a class the catalog never printed', () => {
+    const { classes } = mergeCatalog({
+      catalog: [],
+      listed: [crawled({ sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes[0].weeks).toEqual([9]);
+  });
+
   it('renders catalog-only ages and weeks the way the site would have', () => {
     const { classes } = mergeCatalog({
       catalog: [catalogClass({
@@ -173,6 +194,7 @@ describe('mergeCatalog', () => {
     });
     const c = classes[0];
     expect(c.ageRangeText).toBe('Ages 3-5 with Caregiver');
+    expect(c.weeks).toEqual([2, 3]);
     expect(c.weeksLabel).toBe('Weeks 2, 3');
     expect(c.daysLabel).toBe('M, W');
   });

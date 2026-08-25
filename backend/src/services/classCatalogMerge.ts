@@ -36,7 +36,7 @@ export interface MergeInput {
 /** A crawled class before the catalog has been merged into it. */
 export type CrawledClass = Omit<
   ChqClass,
-  'catalogId' | 'categories' | 'materials' | 'fee' | 'room' | 'provenance'
+  'catalogId' | 'categories' | 'materials' | 'fee' | 'room' | 'provenance' | 'weeks'
 >;
 
 export interface MergeSummary {
@@ -146,6 +146,7 @@ function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: str
     priceLabel: c.fee,
     location: c.location,
     room: c.room,
+    weeks: c.weeks,
     weeksLabel: weeksLabel(c.weeks),
     daysLabel: c.daysOfWeek.map((d) => DAY_ABBR[d] ?? d).join(', '),
     sessionCount: c.weeks.length || null,
@@ -204,6 +205,13 @@ export function mergeCatalog(input: MergeInput): MergeResult {
       ageRange: cat && (cat.ageRange.min !== null || cat.ageRange.max !== null)
         ? cat.ageRange
         : c.ageRange,
+      // Union rather than either alone. The catalog holds the weeks already
+      // past, which the site has dropped; the crawl holds any the catalog did
+      // not print, which is all a listing-only class has.
+      weeks: [...new Set([
+        ...(cat?.weeks ?? []),
+        ...c.sessions.map((s) => s.week),
+      ])].sort((a, b) => a - b),
       provenance: { catalog: Boolean(cat), lastObserved: crawlDate, status: 'listed' as const },
     };
   });

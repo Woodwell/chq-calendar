@@ -102,8 +102,8 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, timeOfDay }));
   }, []);
 
-  const toggleCategory = useCallback((subject: string) => {
-    setFilters((f) => ({ ...f, selectedCategories: toggle(f.selectedCategories, subject) }));
+  const toggleCategory = useCallback((category: string) => {
+    setFilters((f) => ({ ...f, selectedCategories: toggle(f.selectedCategories, category) }));
   }, []);
 
   const toggleWeek = useCallback((week: number) => {

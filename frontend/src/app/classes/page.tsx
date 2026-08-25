@@ -95,8 +95,8 @@ export default function ClassesPage() {
   );
 
   // Drawn from what is in scope, so hiding finished classes also drops the
-  // subjects only they had.
-  const subjects = useMemo(() => availableCategories(inScope), [inScope]);
+  // categories only they had.
+  const categories = useMemo(() => availableCategories(inScope), [inScope]);
 
   const visible = useMemo(
     () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
@@ -210,7 +210,7 @@ export default function ClassesPage() {
           <>
             <ClassFilters
               filters={filterState.filters}
-              subjects={subjects}
+              categories={categories}
               weeks={weeks}
               days={days}
               meetingDayOptions={meetingDayOptions}
@@ -221,7 +221,7 @@ export default function ClassesPage() {
               onToggleIncludeFinished={filterState.toggleIncludeFinished}
               onSetAvailability={filterState.setAvailability}
               onSetTimeOfDay={filterState.setTimeOfDay}
-              onToggleSubject={filterState.toggleCategory}
+              onToggleCategory={filterState.toggleCategory}
               onToggleWeek={filterState.toggleWeek}
               onToggleDay={filterState.toggleDay}
               onToggleMeetingDays={filterState.toggleMeetingDays}

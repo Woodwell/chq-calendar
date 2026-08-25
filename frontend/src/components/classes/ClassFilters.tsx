@@ -70,7 +70,7 @@ const TIMES: { value: TimeOfDay; label: string }[] = [
 
 interface ClassFiltersProps {
   filters: ClassFilterState;
-  subjects: string[];
+  categories: string[];
   weeks: number[];
   days: string[];
   meetingDayOptions: number[];
@@ -81,7 +81,7 @@ interface ClassFiltersProps {
   onToggleIncludeFinished: () => void;
   onSetAvailability: (value: AvailabilityFilter) => void;
   onSetTimeOfDay: (value: TimeOfDay) => void;
-  onToggleSubject: (subject: string) => void;
+  onToggleCategory: (category: string) => void;
   onToggleWeek: (week: number) => void;
   onToggleDay: (day: string) => void;
   onToggleMeetingDays: (days: number) => void;
@@ -89,9 +89,9 @@ interface ClassFiltersProps {
 }
 
 export function ClassFilters({
-  filters, subjects, weeks, days, meetingDayOptions, favoriteCount, finishedCount, activeCount,
+  filters, categories, weeks, days, meetingDayOptions, favoriteCount, finishedCount, activeCount,
   onSetSearchTerm, onToggleIncludeFinished,
-  onSetAvailability, onSetTimeOfDay, onToggleSubject, onToggleWeek, onToggleDay,
+  onSetAvailability, onSetTimeOfDay, onToggleCategory, onToggleWeek, onToggleDay,
   onToggleMeetingDays, onToggleFavoritesOnly,
 }: ClassFiltersProps) {
   // Open on a wide screen, closed on a phone. Expanded, the pickers run to
@@ -148,22 +148,23 @@ export function ClassFilters({
         />
       </Group>
 
-      {subjects.length > 0 && (
-        <Group label="Subject">
-          {subjects.map((subject) => (
+      {categories.length > 0 && (
+        <Group label="Category">
+          {categories.map((category) => (
             <Toggle
-              key={subject}
-              label={subject}
-              active={filters.selectedCategories.includes(subject)}
-              onClick={() => onToggleSubject(subject)}
+              key={category}
+              label={category}
+              active={filters.selectedCategories.includes(category)}
+              onClick={() => onToggleCategory(category)}
             />
           ))}
         </Group>
       )}
 
-      {/* Only the weeks and days that still have sessions are offered: late
-          in the season most of them are gone, and a row of buttons that
-          match nothing is worse than no row at all. */}
+      {/* Weeks come from the printed schedule, so all nine stay selectable
+          once the season is under way — the catalog remembers a week the
+          ticket site has already dropped. Days still come from the sessions
+          themselves, where a button that matches nothing is worse than none. */}
       {weeks.length > 0 && (
         <Group label="Week">
           {weeks.map((week) => (

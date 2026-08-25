@@ -139,6 +139,17 @@ export interface ChqClass extends ClassSearchRow, ClassDetail {
   fee: string | null;
   /** Room within `location`, which the site runs together into one string. */
   room: string | null;
+  /**
+   * Every season week the class is scheduled for, ascending.
+   *
+   * Not derivable from `sessions`: the ticket site drops a session the moment
+   * its week is over, so by late August a listed class shows only the weeks
+   * still to come. The catalog remembers the whole schedule, which is what
+   * makes filtering by a week that has already happened possible at all.
+   * Falls back to the weeks the crawl saw for a class the catalog never
+   * printed.
+   */
+  weeks: number[];
   provenance: ClassProvenance;
   timezone: 'America/New_York';
 }
