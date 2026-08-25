@@ -330,6 +330,46 @@ describe('ClassesPage', () => {
     expect(screen.queryByText(/Sessions: \$145/)).not.toBeInTheDocument();
   });
 
+  it('expands a long filter group and collapses it again', async () => {
+    // Nine venues, one over the threshold, so the group starts collapsed.
+    const venues = Array.from({ length: 9 }, (_, i) => `Venue ${i + 1}`);
+    useClassData.mockReturnValue(loaded(venues.map((v, i) => makeClass({
+      id: `CHQ.EVN${i}`, title: `Class ${i}`, venues: [v],
+    }))));
+    render(<ClassesPage />);
+    await openFilters();
+
+    const toggle = () => screen.getByRole('button', { name: /Show all 9|Show fewer/ });
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Venue 1' })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Venue 1' })).toBeInTheDocument());
+    // The way back out has to survive expanding, which is where it went
+    // missing: with everything shown, nothing is hidden.
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(toggle());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Venue 1' })).not.toBeInTheDocument());
+  });
+
+  it('keeps a selected option visible when the group is collapsed', async () => {
+    const venues = Array.from({ length: 9 }, (_, i) => `Venue ${i + 1}`);
+    useClassData.mockReturnValue(loaded(venues.map((v, i) => makeClass({
+      id: `CHQ.EVN${i}`, title: `Class ${i}`, venues: [v],
+    }))));
+    render(<ClassesPage />);
+    await openFilters();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show all 9/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Venue 3' }));
+    fireEvent.click(screen.getByRole('button', { name: /Show fewer/ }));
+
+    // A filter you cannot see is a filter you cannot undo.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Venue 1' })).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Venue 3' })).toBeInTheDocument();
+  });
+
   it('filters by venue', async () => {
     useClassData.mockReturnValue(loaded([
       makeClass({ title: 'At Hultquist', venues: ['Hultquist Center'] }),

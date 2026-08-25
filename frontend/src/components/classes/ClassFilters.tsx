@@ -65,7 +65,6 @@ function CollapsibleGroup({ label, options, onToggle }: {
   // three and would be silly behind a button.
   const collapses = options.length > COLLAPSE_ABOVE;
   const shown = !collapses || expanded ? options : selected;
-  const hidden = options.length - shown.length;
 
   return (
     <Group label={label}>
@@ -77,14 +76,17 @@ function CollapsibleGroup({ label, options, onToggle }: {
           onClick={() => onToggle(o.value)}
         />
       ))}
-      {hidden > 0 && (
+      {/* Gated on whether the group collapses at all, not on how much is
+          hidden right now: once expanded nothing is hidden, and keying off
+          that made the way back out vanish exactly when it was needed. */}
+      {collapses && (
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
           aria-expanded={expanded}
           className="px-2 py-1 rounded-full text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
         >
-          {expanded ? 'Show less' : `Show all ${options.length}`}
+          {expanded ? 'Show fewer' : `Show all ${options.length}`}
         </button>
       )}
     </Group>
