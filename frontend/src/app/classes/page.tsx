@@ -82,15 +82,16 @@ export default function ClassesPage() {
   const days = useMemo(() => availableDays(classes), [classes]);
   const meetingDayOptions = useMemo(() => availableMeetingDays(classes), [classes]);
 
-  // A class with no sessions left cannot be signed up for, and by late
-  // August that is most of the catalog. Hidden unless asked for, and the
-  // count is offered rather than the classes, so the page opens on what is
-  // actually available.
-  const finished = useMemo(() => classes.filter((c) => c.sessions.length === 0), [classes]);
+  // "Finished" means there is nothing left to book, not that the class never
+  // happened — by late August that is most of the catalog. It is a filter on
+  // bookability, deliberately independent of which weeks are selected: asking
+  // for week 2 in August returns classes that all finished long ago, and
+  // those are exactly the ones this hides. The count of what it hides is
+  // shown next to the results, because otherwise the number moves for no
+  // visible reason.
+  const bookable = (c: ChqClass) => c.sessions.length > 0;
   const inScope = useMemo(
-    () => (filterState.filters.includeFinished
-      ? classes
-      : classes.filter((c) => c.sessions.length > 0)),
+    () => (filterState.filters.includeFinished ? classes : classes.filter(bookable)),
     [classes, filterState.filters.includeFinished],
   );
 
@@ -102,6 +103,19 @@ export default function ClassesPage() {
     () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(bySoonestSession),
     [inScope, options, filtering],
   );
+  // How many of the results can still be signed up for. Stated alongside the
+  // total so "102 classes" does not read as "102 classes with places".
+  const bookableVisible = useMemo(() => visible.filter(bookable).length, [visible]);
+
+  // What the bookability filter is holding back, counted against the same
+  // filters as the results — otherwise the offer to show them is a number
+  // that has nothing to do with what is on screen.
+  const hiddenUnbookable = useMemo(() => {
+    if (filterState.filters.includeFinished) return 0;
+    const unbookable = classes.filter((c) => !bookable(c));
+    return (filtering ? filterClasses(unbookable, options) : unbookable).length;
+  }, [classes, options, filtering, filterState.filters.includeFinished]);
+
   const matchingSessions = useMemo(
     () => visible.reduce(
       (n, c) => n + (dimming
@@ -215,7 +229,7 @@ export default function ClassesPage() {
               days={days}
               meetingDayOptions={meetingDayOptions}
               favoriteCount={favorites.favoriteCount}
-              finishedCount={finished.length}
+              finishedCount={hiddenUnbookable || classes.filter((c) => !bookable(c)).length}
               activeCount={activeFilterCount(options)}
               onSetSearchTerm={filterState.setSearchTerm}
               onToggleIncludeFinished={filterState.toggleIncludeFinished}
@@ -230,9 +244,22 @@ export default function ClassesPage() {
 
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {filtering
-                  ? `${visible.length} of ${inScope.length} classes · ${matchingSessions} matching sessions`
-                  : `${visible.length} classes · ${matchingSessions} sessions still scheduled`}
+                {`${visible.length} ${visible.length === 1 ? 'class' : 'classes'}`}
+                {bookableVisible > 0 && (
+                  <span>{` · ${bookableVisible} with places left`}</span>
+                )}
+                {hiddenUnbookable > 0 && (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      onClick={filterState.toggleIncludeFinished}
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {`show ${hiddenUnbookable} you can no longer book`}
+                    </button>
+                  </>
+                )}
                 {filtering && (
                   <button
                     type="button"
@@ -271,6 +298,9 @@ export default function ClassesPage() {
                     onToggleDescription={toggleDescription}
                     isFavorite={favorites.isFavorite}
                     onToggleFavorite={favorites.toggleFavorite}
+                    weekMatches={dimming && options.selectedWeeks.length > 0
+                      ? (week: number) => options.selectedWeeks.includes(week)
+                      : undefined}
                     sessionMatches={dimming
                       ? (sx: ClassSession) => sessionMatches(chqClass.id, sx, options)
                       : undefined}

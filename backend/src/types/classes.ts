@@ -52,6 +52,29 @@ export interface ClassSession {
   availability: ClassAvailability;
 }
 
+/**
+ * One week the printed catalog schedules a class for.
+ *
+ * This is the plan, not an observation. The ticket site drops a session the
+ * moment its week ends, so for any week already past this is the only record
+ * of when and where the class met — which is what makes a card still readable
+ * when someone filters to week 2 in late August.
+ *
+ * It deliberately carries no enrolment: how full a class was is something
+ * only the crawl could ever have seen, and inventing it here would be
+ * inventing evidence.
+ */
+export interface ScheduledWeek {
+  week: number;
+  /** Full day names, Monday-first, as the catalog prints them. */
+  daysOfWeek: string[];
+  /** As printed, e.g. "9:00 AM". Empty when the catalog leaves it blank. */
+  startTime: string;
+  endTime: string;
+  location: string;
+  room: string;
+}
+
 /** A class as it appears in a search-results row (no per-session detail). */
 export interface ClassSearchRow {
   /** Event id, e.g. "CHQ.EVN1687". */
@@ -150,6 +173,11 @@ export interface ChqClass extends ClassSearchRow, ClassDetail {
    * printed.
    */
   weeks: number[];
+  /**
+   * The catalog's intended schedule, one entry per week in `weeks`. Empty for
+   * a class the catalog never printed, whose only schedule is its sessions.
+   */
+  scheduledWeeks: ScheduledWeek[];
   provenance: ClassProvenance;
   timezone: 'America/New_York';
 }

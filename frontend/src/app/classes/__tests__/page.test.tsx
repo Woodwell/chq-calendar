@@ -21,6 +21,7 @@ const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
   title: 'Watercolors for Beginners',
   catalogId: null,
   weeks: [8],
+  scheduledWeeks: [],
   materials: null,
   fee: null,
   room: null,
@@ -71,10 +72,10 @@ async function openFilters() {
   fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }));
 }
 
-/** Finished classes are hidden by default; this is the checkbox for them. */
+/** Classes with nothing left to book are hidden by default; this is the box. */
 async function includeFinished() {
   await openFilters();
-  fireEvent.click(screen.getByRole('checkbox', { name: /Include \d+ finished/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /Include \d+ you can no longer book/ }));
 }
 
 describe('bySoonestSession', () => {
@@ -171,7 +172,14 @@ describe('ClassesPage', () => {
   });
 
   it('hides classes whose sessions have all passed, and offers them by count', async () => {
-    useClassData.mockReturnValue(loaded([makeClass(), makeClass({ id: 'CHQ.EVN9', title: 'Finished Class', sessions: [] })]));
+    useClassData.mockReturnValue(loaded([makeClass(), makeClass({
+      id: 'CHQ.EVN9', title: 'Finished Class', sessions: [], weeks: [2],
+      scheduledWeeks: [{
+        week: 2, daysOfWeek: ['Monday', 'Wednesday'],
+        startTime: '9:00 AM', endTime: '10:15 AM',
+        location: 'Hultquist', room: '101',
+      }],
+    })]));
     render(<ClassesPage />);
 
     // Late in the season these are most of the catalog and none can be
@@ -181,7 +189,13 @@ describe('ClassesPage', () => {
 
     await includeFinished();
     expect(await screen.findByText('Finished Class')).toBeInTheDocument();
-    expect(screen.getByText('No sessions remaining this season.')).toBeInTheDocument();
+    // The ticket site has dropped the week 2 session, so the card falls back
+    // to the schedule the catalog printed rather than going blank.
+    expect(screen.getByText('Week 2')).toBeInTheDocument();
+    expect(screen.getByText(/Monday, Wednesday · 9:00 AM - 10:15 AM · 📍 Hultquist 101/))
+      .toBeInTheDocument();
+    // No spot count and no register link for a week that is over.
+    expect(screen.getByText('Over')).toBeInTheDocument();
   });
 
   it('stars a single session, under a key that cannot collide with an event', async () => {
@@ -244,7 +258,7 @@ describe('ClassesPage filters', () => {
 
     await waitFor(() => expect(screen.queryByText('Full Class')).not.toBeInTheDocument());
     expect(screen.getByText('Watercolors for Beginners')).toBeInTheDocument();
-    expect(screen.getByText(/1 of 2 classes/)).toBeInTheDocument();
+    expect(screen.getByText(/^1 class/)).toBeInTheDocument();
   });
 
   it('keeps a filtered-out session visible but dimmed', async () => {

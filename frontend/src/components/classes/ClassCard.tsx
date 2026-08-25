@@ -1,4 +1,4 @@
-import type { ChqClass, ClassProvenance, ClassSession } from '@/lib/classTypes';
+import type { ChqClass, ClassProvenance, ClassSession, ScheduledWeek } from '@/lib/classTypes';
 import { classSessionKey } from '@/lib/classTypes';
 
 /**
@@ -21,6 +21,45 @@ function availabilityLabel(session: ClassSession): { text: string; className: st
     };
   }
   return { text: 'Check availability', className: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300' };
+}
+
+/**
+ * A week the class was scheduled for, which the ticket site no longer lists.
+ *
+ * Shown from the printed catalog so that filtering to a week already past
+ * still produces a card that talks about that week. It offers no spot count,
+ * no star and no register link — none of those mean anything for a week that
+ * is over, and a star needs a session id the catalog does not have.
+ */
+function ScheduledRow({ scheduled, matches }: { scheduled: ScheduledWeek; matches: boolean }) {
+  const place = [scheduled.location, scheduled.room].filter(Boolean).join(' ');
+  const time = scheduled.startTime && scheduled.endTime
+    ? `${scheduled.startTime} - ${scheduled.endTime}`
+    : scheduled.startTime;
+
+  return (
+    <li className={`flex items-start gap-2 py-2 border-t border-gray-100 dark:border-gray-700 first:border-t-0 ${
+      matches ? '' : 'opacity-40'
+    }`}>
+      {/* Keeps the text aligned with the starred rows above and below. */}
+      <span className="w-6 shrink-0" aria-hidden="true" />
+
+      <div className="flex-1 min-w-0 text-sm">
+        <div className="text-gray-900 dark:text-gray-100">
+          <span className="font-medium">Week {scheduled.week}</span>
+        </div>
+        <div className="text-gray-500 dark:text-gray-400 text-xs">
+          {scheduled.daysOfWeek.join(', ')}
+          {time && <> · {time}</>}
+          {place && <> · 📍 {place}</>}
+        </div>
+      </div>
+
+      <span className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+        Over
+      </span>
+    </li>
+  );
 }
 
 interface SessionRowProps {
@@ -83,6 +122,32 @@ function SessionRow({ session, classId, registerUrl, isFavorite, onToggleFavorit
   );
 }
 
+/** One line on the card: a live session where there is one, else the plan. */
+type ScheduleRow =
+  | { session: ClassSession; scheduled?: undefined }
+  | { session?: undefined; scheduled: ScheduledWeek };
+
+/**
+ * Every week the class runs, in order, each shown from the best source.
+ *
+ * The ticket site drops a session once its week is over, so late in the
+ * season a card built from sessions alone talks only about the weeks still to
+ * come — which reads as nonsense next to a filter set to week 2. Weeks the
+ * crawl can still see keep their live detail and spot count; the rest fall
+ * back to the schedule the catalog printed.
+ */
+export function scheduleRows(chqClass: ChqClass): ScheduleRow[] {
+  const bySession = new Map(chqClass.sessions.map((s) => [s.week, s]));
+  const scheduled = new Map((chqClass.scheduledWeeks ?? []).map((w) => [w.week, w]));
+  const weeks = [...new Set([...bySession.keys(), ...scheduled.keys()])].sort((a, b) => a - b);
+
+  return weeks.map((week) => {
+    const session = bySession.get(week);
+    if (session) return { session };
+    return { scheduled: scheduled.get(week)! };
+  });
+}
+
 interface ClassCardProps {
   chqClass: ChqClass;
   isExpanded: boolean;
@@ -96,6 +161,12 @@ interface ClassCardProps {
    * two-session class look like a one-session class.
    */
   sessionMatches?: (session: ClassSession) => boolean;
+  /**
+   * Whether a week with no session left survives the active filters. Separate
+   * from `sessionMatches` because there is no session to hand it — only the
+   * week is known, so only the week can be judged.
+   */
+  weekMatches?: (week: number) => boolean;
 }
 
 /**
@@ -131,8 +202,11 @@ function ProvenanceNote({ provenance }: { provenance: ClassProvenance }) {
   );
 }
 
-export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite, sessionMatches }: ClassCardProps) {
-  const { sessions } = chqClass;
+export function ClassCard({
+  chqClass, isExpanded, onToggleDescription, isFavorite, onToggleFavorite,
+  sessionMatches, weekMatches = () => true,
+}: ClassCardProps) {
+  const rows = scheduleRows(chqClass);
 
   return (
     <article className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-5">
@@ -188,25 +262,29 @@ export function ClassCard({ chqClass, isExpanded, onToggleDescription, isFavorit
       )}
 
       <div className="mt-3">
-        {sessions.length === 0 ? (
-          // Sessions disappear from the ticket site once their week is over,
-          // so this is what a finished class looks like, not an error.
+        {rows.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            No sessions remaining this season.
+            No schedule recorded for this class.
           </p>
         ) : (
           <ul>
-            {sessions.map((session) => (
+            {rows.map((row) => (row.session ? (
               <SessionRow
-                key={session.performanceId}
-                session={session}
+                key={row.session.performanceId}
+                session={row.session}
                 classId={chqClass.id}
                 registerUrl={chqClass.sourceUrl}
-                isFavorite={isFavorite(classSessionKey(chqClass.id, session.performanceId))}
+                isFavorite={isFavorite(classSessionKey(chqClass.id, row.session.performanceId))}
                 onToggleFavorite={onToggleFavorite}
-                matches={sessionMatches ? sessionMatches(session) : true}
+                matches={sessionMatches ? sessionMatches(row.session) : true}
               />
-            ))}
+            ) : (
+              <ScheduledRow
+                key={`week-${row.scheduled.week}`}
+                scheduled={row.scheduled}
+                matches={weekMatches(row.scheduled.week)}
+              />
+            )))}
           </ul>
         )}
       </div>

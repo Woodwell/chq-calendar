@@ -21,7 +21,7 @@
  */
 import { reconcileCatalog, type CatalogEntry, type ListedClass } from './classCatalogMatcher';
 import type { CatalogClass } from './classCatalog';
-import type { ChqClass, ClassStatus } from '../types/classes';
+import type { ChqClass, ClassStatus, ScheduledWeek } from '../types/classes';
 
 export interface MergeInput {
   catalog: CatalogClass[];
@@ -36,7 +36,8 @@ export interface MergeInput {
 /** A crawled class before the catalog has been merged into it. */
 export type CrawledClass = Omit<
   ChqClass,
-  'catalogId' | 'categories' | 'materials' | 'fee' | 'room' | 'provenance' | 'weeks'
+  'catalogId' | 'categories' | 'materials' | 'fee' | 'room' | 'provenance'
+  | 'weeks' | 'scheduledWeeks'
 >;
 
 export interface MergeSummary {
@@ -111,6 +112,24 @@ const DAY_ABBR: Record<string, string> = {
   Friday: 'F', Saturday: 'Sa', Sunday: 'Su',
 };
 
+/**
+ * The catalog's schedule, one entry per week it runs.
+ *
+ * The catalog prints a single day/time per class rather than one per week, so
+ * every week it runs shares the same shape. Kept as a list anyway, because
+ * the reader wants to see week 2 and week 3 as separate rows on the card.
+ */
+function scheduledWeeksOf(c: CatalogClass): ScheduledWeek[] {
+  return c.weeks.map((week) => ({
+    week,
+    daysOfWeek: c.daysOfWeek,
+    startTime: c.startTime,
+    endTime: c.endTime,
+    location: c.location,
+    room: c.room,
+  }));
+}
+
 /** Ages rendered the way the site writes them, so both sources read alike. */
 function ageRangeText(c: CatalogClass): string {
   const { min, max } = c.ageRange;
@@ -147,6 +166,7 @@ function fromCatalogOnly(c: CatalogClass, status: ClassStatus, lastObserved: str
     location: c.location,
     room: c.room,
     weeks: c.weeks,
+    scheduledWeeks: scheduledWeeksOf(c),
     weeksLabel: weeksLabel(c.weeks),
     daysLabel: c.daysOfWeek.map((d) => DAY_ABBR[d] ?? d).join(', '),
     sessionCount: c.weeks.length || null,
@@ -212,6 +232,10 @@ export function mergeCatalog(input: MergeInput): MergeResult {
         ...(cat?.weeks ?? []),
         ...c.sessions.map((s) => s.week),
       ])].sort((a, b) => a - b),
+      // The plan for every week, including those the site has already
+      // dropped. The card falls back to these so a past week still reads as
+      // a week rather than as whatever session happens to be left.
+      scheduledWeeks: cat ? scheduledWeeksOf(cat) : [],
       provenance: { catalog: Boolean(cat), lastObserved: crawlDate, status: 'listed' as const },
     };
   });

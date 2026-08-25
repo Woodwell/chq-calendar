@@ -234,7 +234,7 @@ export function ClassFilters({
               onChange={onToggleIncludeFinished}
               className="rounded border-gray-300 dark:border-gray-600"
             />
-            Include {finishedCount} finished {finishedCount === 1 ? 'class' : 'classes'}
+            Include {finishedCount} you can no longer book
           </label>
         </div>
       )}

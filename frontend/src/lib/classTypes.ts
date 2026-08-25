@@ -59,6 +59,24 @@ export interface ClassMaterials {
   instructor: boolean;
 }
 
+/**
+ * One week the printed catalog schedules a class for.
+ *
+ * The plan, not an observation. The ticket site drops a session once its week
+ * ends, so for a week already past this is the only record of when and where
+ * the class met. It carries no enrolment on purpose: how full a class was is
+ * something only a crawl could have seen.
+ */
+export interface ScheduledWeek {
+  week: number;
+  daysOfWeek: string[];
+  /** As the catalog prints it, e.g. "9:00 AM". */
+  startTime: string;
+  endTime: string;
+  location: string;
+  room: string;
+}
+
 export interface ChqClass {
   /** Event id on the ticket site, e.g. "CHQ.EVN1687". */
   id: string;
@@ -97,6 +115,8 @@ export interface ChqClass {
    * come. This is the whole schedule, remembered by the printed catalog.
    */
   weeks: number[];
+  /** The catalog's intended schedule, one entry per week in `weeks`. */
+  scheduledWeeks: ScheduledWeek[];
   provenance: ClassProvenance;
   description: string;
   sessions: ClassSession[];

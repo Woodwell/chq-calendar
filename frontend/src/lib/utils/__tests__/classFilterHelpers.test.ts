@@ -33,6 +33,7 @@ const chqClass = (id: string, sessions: ClassSession[]): ChqClass => ({
   title: id,
   catalogId: null,
   weeks: [8],
+  scheduledWeeks: [],
   materials: null,
   fee: null,
   room: null,
