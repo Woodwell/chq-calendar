@@ -1,7 +1,7 @@
 import { defineConfig, PluginOption } from 'vite';
 import preact from '@preact/preset-vite';
 import { resolve } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, createReadStream } from 'fs';
 import { execSync } from 'child_process';
 import { buildSitemapXml, PUBLIC_PATHS } from './src/lib/sitemap';
 
@@ -95,6 +95,46 @@ function emitSitemapXml(): PluginOption {
 
 const APP_VERSION = resolveAppVersion();
 
+/**
+ * Serves the class catalog from the build output instead of proxying it.
+ *
+ * `/cache/*` is proxied to the live site, which is right for events and the
+ * links feeds but wrong for the classes file: that one is not deployed
+ * anywhere, so the proxy answers with S3's NoSuchKey and the page renders
+ * empty. The droplet's Caddyfile carves the same exception out ahead of its
+ * own proxy; this keeps `npm run preview` honest about what a demo host does.
+ *
+ * Installed in the hook body rather than a returned callback, so it runs
+ * before Vite's internal proxy rather than after it.
+ */
+function previewCatalogMiddleware(): PluginOption {
+  return {
+    name: 'preview-catalog-middleware',
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = req.url?.split('?')[0] ?? '';
+        if (!/^\/cache\/calendar-cache\/classes-\d{4}\.json$/.test(path)) {
+          next();
+          return;
+        }
+        const file = resolve(__dirname, 'out', path.replace(/^\//, ''));
+        if (!existsSync(file)) {
+          // Say which file is missing rather than letting it fall through to
+          // the proxy, which answers with an S3 error that explains nothing.
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: `No catalog at ${file}. Stage it with: ` +
+              'mkdir -p out/cache/calendar-cache && cp public/data/classes-2026.json out/cache/calendar-cache/',
+          }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
 // Proxy config shared between dev server and preview server.
 // Routes API/auth requests to the local backend (port 3001) and
 // cache requests to the production CDN.
@@ -122,7 +162,10 @@ const backendProxy = {
 
 export default defineConfig({
   appType: 'mpa',
-  plugins: [devServerMiddleware(), preact(), emitVersionJson(APP_VERSION), emitSitemapXml()],
+  plugins: [
+    devServerMiddleware(), previewCatalogMiddleware(), preact(),
+    emitVersionJson(APP_VERSION), emitSitemapXml(),
+  ],
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(APP_VERSION),
     // Demo builds show when they were made; a preview nobody can date is

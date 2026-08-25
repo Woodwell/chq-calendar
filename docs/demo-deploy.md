@@ -46,8 +46,14 @@ cp frontend/public/data/classes-2026.json frontend/out/cache/calendar-cache/
 ```
 
 Refresh it with `npm run sync:classes --workspace=chautauqua-backend` — a full
-crawl takes about four minutes, or ten on the first run of a season when it
-also has to learn every class's subjects.
+crawl of the ticket site takes about three minutes. For spot counts alone,
+`-- --mode=spots` re-reads only the classes running soon, which is seconds
+rather than minutes.
+
+The published file is the crawl merged with the printed catalog. If you have
+crawled but not merged — or have edited `config/SpecialStudies.csv` — run
+`npm run backfill:classes -- --write --workspace=chautauqua-backend`, which
+makes no network requests at all.
 
 ## 3. rsync
 
