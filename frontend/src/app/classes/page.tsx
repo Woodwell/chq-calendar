@@ -92,7 +92,7 @@ export default function ClassesPage() {
   const venues = useMemo(() => availableVenues(inScope), [inScope]);
 
   const visible = useMemo(
-    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(byLifecycle(nowLocal)),
+    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(byLifecycle(nowLocal, options)),
     [inScope, options, filtering, nowLocal],
   );
   // The two groups worth a number: what has not begun, and what is under
@@ -103,13 +103,13 @@ export default function ClassesPage() {
     let running = 0;
     let ended = 0;
     for (const c of visible) {
-      const stage = classLifecycle(c, nowLocal);
+      const stage = classLifecycle(c, nowLocal, options);
       if (stage === 'upcoming') upcoming++;
       else if (stage === 'running') running++;
       else ended++;
     }
     return { upcoming, running, ended };
-  }, [visible, nowLocal]);
+  }, [visible, nowLocal, options]);
 
   const toggleDescription = (classId: string) => {
     setExpanded((prev) => {

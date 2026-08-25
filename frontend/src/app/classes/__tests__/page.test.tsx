@@ -1,6 +1,6 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
 import ClassesPage, { describeAge } from '../page';
-import { byLifecycle } from '@/lib/utils/classFilterHelpers';
+import { EMPTY_CLASS_FILTERS, byLifecycle, classLifecycle } from '@/lib/utils/classFilterHelpers';
 import type { ChqClass } from '@/lib/classTypes';
 
 const useClassData = vi.fn();
@@ -139,6 +139,28 @@ describe('byLifecycle', () => {
     expect(byLifecycle('2026-08-25 17:00:00')(thisAfternoon, thisMorning)).toBeLessThan(0);
     // After both: the more recent finish leads the history.
     expect(byLifecycle('2026-08-25 23:00:00')(thisAfternoon, thisMorning)).toBeLessThan(0);
+  });
+
+  it('judges a class on the sessions in scope, not all of them', () => {
+    // Runs week 8 (finished) and week 9 (still to come). Asked about week 8,
+    // the honest answer is that it has finished — being told it is under way
+    // because of some other week answers a question nobody asked.
+    const spanning = makeClass({
+      id: 'spanning', title: 'spanning', weeks: [8, 9],
+      sessions: [
+        { ...makeClass().sessions[0], week: 8, startDate: '2026-08-10 09:00:00', endDate: '2026-08-14 10:00:00' },
+        { ...makeClass().sessions[0], performanceId: 'p9', week: 9, startDate: '2026-08-26 09:00:00', endDate: '2026-08-28 10:00:00' },
+      ],
+    });
+    const week8 = { ...EMPTY_CLASS_FILTERS, selectedWeeks: [8] };
+    const week9 = { ...EMPTY_CLASS_FILTERS, selectedWeeks: [9] };
+
+    expect(classLifecycle(spanning, NOW_LOCAL, week8)).toBe('ended');
+    expect(classLifecycle(spanning, NOW_LOCAL, week9)).toBe('upcoming');
+    // Unfiltered it spans the moment — began in week 8, runs into week 9 —
+    // so the class as a whole is under way. Three different true answers
+    // about one class, and which is right depends on what was asked.
+    expect(classLifecycle(spanning, NOW_LOCAL)).toBe('running');
   });
 
   it('orders what has not started by what starts soonest', () => {

@@ -234,19 +234,43 @@ export function isSessionOver(session: ClassSession, nowLocal: string): boolean 
  */
 export type ClassLifecycle = 'upcoming' | 'running' | 'ended';
 
-export function classLifecycle(chqClass: ChqClass, nowLocal: string): ClassLifecycle {
+/**
+ * The sessions a class is being judged on.
+ *
+ * With filters set, only the ones that satisfy them. Asking about week 8 and
+ * being told a class is under way — because it also runs in week 9 — is an
+ * answer to a question nobody asked.
+ */
+function sessionsInScope(
+  chqClass: ChqClass,
+  options?: ClassFilterOptions,
+): ClassSession[] {
+  if (!options || !hasSessionFilters(options)) return chqClass.sessions;
+  return chqClass.sessions.filter((sn) => sessionMatches(chqClass.id, sn, options));
+}
+
+export function classLifecycle(
+  chqClass: ChqClass,
+  nowLocal: string,
+  options?: ClassFilterOptions,
+): ClassLifecycle {
   // Turns on sessions, not on the printed schedule. Ten classes are listed
   // all season with nothing bookable in any week; those are labelled honestly
   // week by week, but they are not something anyone can start, so they do not
   // belong above the classes that are.
-  if (chqClass.sessions.length === 0) return 'ended';
+  //
+  // With a filter set this is the sessions that pass it, so a class matched
+  // only by a printed week the crawl cannot see has none in scope and is
+  // finished as far as the question goes.
+  const sessions = sessionsInScope(chqClass, options);
+  if (sessions.length === 0) return 'ended';
 
   // Compared as full local datetimes, not day keys. On a date alone a class
   // starting at four in the afternoon reads as under way all morning, and one
   // that finished at half past ten reads as under way until midnight — both
   // of which are wrong at the moment somebody is looking.
-  const starts = chqClass.sessions.map((sn) => sn.startDate).sort();
-  const ends = chqClass.sessions.map((sn) => sn.endDate).sort();
+  const starts = sessions.map((sn) => sn.startDate).sort();
+  const ends = sessions.map((sn) => sn.endDate).sort();
   if (nowLocal < starts[0]) return 'upcoming';
   if (nowLocal > ends[ends.length - 1]) return 'ended';
   return 'running';
@@ -261,16 +285,18 @@ const LIFECYCLE_ORDER: Record<ClassLifecycle, number> = { upcoming: 0, running: 
  * what starts soonest, what ends soonest, and — for history — what happened
  * most recently, which is what someone scrolling back is looking for.
  */
-export function byLifecycle(nowLocal: string) {
+export function byLifecycle(nowLocal: string, options?: ClassFilterOptions) {
+  // Ordered on the same sessions the counts are taken over, so the sentence
+  // above the cards describes the cards below it.
   const firstStart = (c: ChqClass) =>
-    c.sessions.reduce<string | null>((min, sn) => (min === null || sn.startDate < min ? sn.startDate : min), null);
+    sessionsInScope(c, options).reduce<string | null>((min, sn) => (min === null || sn.startDate < min ? sn.startDate : min), null);
   const lastEnd = (c: ChqClass) =>
-    c.sessions.reduce<string | null>((max, sn) => (max === null || sn.endDate > max ? sn.endDate : max), null);
+    sessionsInScope(c, options).reduce<string | null>((max, sn) => (max === null || sn.endDate > max ? sn.endDate : max), null);
   const lastWeek = (c: ChqClass) => (c.weeks ?? []).reduce((m, w) => (w > m ? w : m), 0);
 
   return (a: ChqClass, b: ChqClass): number => {
-    const la = classLifecycle(a, nowLocal);
-    const lb = classLifecycle(b, nowLocal);
+    const la = classLifecycle(a, nowLocal, options);
+    const lb = classLifecycle(b, nowLocal, options);
     if (la !== lb) return LIFECYCLE_ORDER[la] - LIFECYCLE_ORDER[lb];
 
     if (la === 'upcoming') {
