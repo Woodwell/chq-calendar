@@ -185,11 +185,17 @@ function WeekStrip({ weeks, selected, onToggle }: {
   );
 }
 
-/** A short row of controls under its heading, the calendar's spacing. */
+/**
+ * A short row of controls beside its heading.
+ *
+ * One line where it fits, wrapping under the label where it does not — the
+ * panel is seven of these, and a heading on its own line for each spent more
+ * vertical space than a phone has.
+ */
 function Group({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="mb-2">
-      <div className={`${SECTION_LABEL} mb-2`}>{label}</div>
+    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className={`${SECTION_LABEL} shrink-0`}>{label}</span>
       <div className="flex flex-wrap items-center gap-1 sm:gap-2">
         {children}
       </div>
@@ -198,14 +204,19 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
 }
 
 
-const AVAILABILITY: { value: AvailabilityFilter; label: string; title: string }[] = [
-  { value: 'all', label: 'Any', title: 'Every class, whether or not it has room' },
-  { value: 'open', label: 'Open', title: 'Sessions with spots left' },
-  { value: 'waitlist', label: 'Waitlist', title: 'Sessions that are full but taking a waitlist' },
+// Open first because it is where nearly everyone starts, and the default.
+// "Any" is the widening move, so it reads last rather than as the norm.
+const AVAILABILITY: { value: AvailabilityFilter; label: string; name: string; title: string }[] = [
+  { value: 'open', label: 'Open', name: 'Open', title: 'Sessions with spots left' },
+  { value: 'waitlist', label: 'Waitlist', name: 'Waitlist', title: 'Sessions that are full but taking a waitlist' },
+  // "Any" appears in this row and in Time of day, so each says what it is any
+  // of — two buttons announcing "Any" is a coin toss for anyone not seeing
+  // which row they are in.
+  { value: 'all', label: 'Any', name: 'Any availability', title: 'Every class, whether or not it has room' },
 ];
 
-const TIMES: { value: TimeOfDay; label: string }[] = [
-  { value: 'all', label: 'Any' },
+const TIMES: { value: TimeOfDay; label: string; name?: string }[] = [
+  { value: 'all', label: 'Any', name: 'Any time of day' },
   { value: 'morning', label: TIME_OF_DAY_LABELS.morning },
   { value: 'afternoon', label: TIME_OF_DAY_LABELS.afternoon },
   { value: 'evening', label: TIME_OF_DAY_LABELS.evening },
@@ -261,6 +272,22 @@ export function ClassFilters({
           aria-label="Search class or instructor"
           className="flex-1 min-w-0 px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm placeholder-gray-400 dark:placeholder-gray-500"
         />
+        {/* Not a filter dimension like the pickers below — it switches what
+            the page is showing you, so it lives with the search and the
+            panel toggle rather than inside a row about spot counts. */}
+        <button
+          type="button"
+          onClick={onToggleFavoritesOnly}
+          aria-pressed={filters.showFavoritesOnly}
+          title="Only the weeks you have starred"
+          className={`shrink-0 px-3 py-2 rounded-md text-sm font-medium border transition-all ${
+            filters.showFavoritesOnly
+              ? 'bg-blue-600 text-white border-blue-600'
+              : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-600'
+          }`}
+        >
+          {`★ ${favoriteCount}`}
+        </button>
         <button
           type="button"
           onClick={() => setOpen((wasOpen: boolean) => !wasOpen)}
@@ -298,23 +325,18 @@ export function ClassFilters({
         />
       )}
 
-      <Group label="Spots">
-        {AVAILABILITY.map(({ value, label, title }) => (
+      <Group label="Availability">
+        {AVAILABILITY.map(({ value, label, name, title }) => (
           <Toggle
             key={value}
             segment
             label={label}
+            name={name}
             title={title}
             active={filters.availability === value}
             onClick={() => onSetAvailability(value)}
           />
         ))}
-        <Toggle
-          label={`★ ${favoriteCount}`}
-          title="Only the sessions you have starred"
-          active={filters.showFavoritesOnly}
-          onClick={onToggleFavoritesOnly}
-        />
       </Group>
 
       {venues.length > 0 && (
@@ -361,11 +383,12 @@ export function ClassFilters({
       )}
 
       <Group label="Time">
-        {TIMES.map(({ value, label }) => (
+        {TIMES.map(({ value, label, name }) => (
           <Toggle
             key={value}
             segment
             label={label}
+            name={name}
             active={filters.timeOfDay === value}
             onClick={() => onSetTimeOfDay(value)}
           />

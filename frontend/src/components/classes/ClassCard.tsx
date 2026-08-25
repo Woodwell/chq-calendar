@@ -75,9 +75,9 @@ const SCHEDULED_BADGE: Record<ScheduledWeekState, { text: string; title: string;
     title: 'The printed catalog scheduled this week; the ticket site no longer lists the class',
     className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
   },
-  unlisted: {
-    text: 'Not listed',
-    title: 'From the printed catalog. The ticket site is not offering a session to book in this week',
+  unavailable: {
+    text: 'Not available',
+    title: 'From the printed catalog. The ticket site is offering nothing to book in this week',
     className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
   },
 };

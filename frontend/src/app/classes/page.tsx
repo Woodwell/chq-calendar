@@ -101,12 +101,14 @@ export default function ClassesPage() {
   const lifecycleCounts = useMemo(() => {
     let upcoming = 0;
     let running = 0;
+    let ended = 0;
     for (const c of visible) {
       const stage = classLifecycle(c, nowLocal);
       if (stage === 'upcoming') upcoming++;
       else if (stage === 'running') running++;
+      else ended++;
     }
-    return { upcoming, running };
+    return { upcoming, running, ended };
   }, [visible, nowLocal]);
 
   const toggleDescription = (classId: string) => {
@@ -227,13 +229,14 @@ export default function ClassesPage() {
 
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {`${visible.length} ${visible.length === 1 ? 'class' : 'classes'}`}
-                {lifecycleCounts.upcoming > 0 && (
-                  <span>{` · ${lifecycleCounts.upcoming} not started`}</span>
-                )}
-                {lifecycleCounts.running > 0 && (
-                  <span>{` · ${lifecycleCounts.running} under way`}</span>
-                )}
+                {/* The three groups the cards are ordered by, and no total:
+                    "516 classes" was the least useful number on the page,
+                    and it read as though they were all on offer. */}
+                {[
+                  `${lifecycleCounts.upcoming} not started`,
+                  `${lifecycleCounts.running} under way`,
+                  `${lifecycleCounts.ended} finished`,
+                ].join(', ')}
                 {filtering && (
                   <button
                     type="button"

@@ -92,6 +92,15 @@ async function openFilters() {
   fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }));
 }
 
+/**
+ * The page opens on Open, so anything finished or cancelled is filtered out
+ * by default. Tests about those have to widen first.
+ */
+async function showEveryAvailability() {
+  await openFilters();
+  fireEvent.click(screen.getByRole('button', { name: 'Any availability' }));
+}
+
 /** Finished weeks fold away on a card; this opens the first card's fold. */
 async function showFinishedWeeks() {
   fireEvent.click(await screen.findByRole('button', { name: /Show \d+ finished week/ }));
@@ -188,6 +197,7 @@ describe('ClassesPage', () => {
 
     // Hidden with the rest of the finished catalog until asked for.
 
+    await showEveryAvailability();
     expect(await screen.findByText('Not listed online')).toBeInTheDocument();
     // No page to register on, so the title must not be a link to nowhere.
     expect(screen.queryByRole('link', { name: 'Long Since Finished' })).not.toBeInTheDocument();
@@ -201,6 +211,7 @@ describe('ClassesPage', () => {
       provenance: { catalog: true, lastObserved: '2026-08-13', status: 'cancelled' },
     })]));
     render(<ClassesPage />);
+    await showEveryAvailability();
     expect(await screen.findByText('Cancelled')).toBeInTheDocument();
     expect(screen.queryByText('Not listed online')).not.toBeInTheDocument();
   });
@@ -221,6 +232,7 @@ describe('ClassesPage', () => {
       sessions: [{ ...makeClass().sessions[0], availability: 'waitlist', spotsRemaining: null }],
     })]));
     render(<ClassesPage />);
+    await showEveryAvailability();
 
     // Scoped to the badge: "Waitlist" is also the name of a filter button.
     expect(await screen.findByText('Waitlist', { selector: 'span' })).toBeInTheDocument();
@@ -242,6 +254,7 @@ describe('ClassesPage', () => {
 
     // Shown by default now. The season's history is the point of the page
     // off-season, and Spots is the control for narrowing to what is joinable.
+    await showEveryAvailability();
     expect(await screen.findByText('Finished Class')).toBeInTheDocument();
     // Every week of it is finished, so its rows start folded away.
     await showFinishedWeeks();
@@ -267,7 +280,9 @@ describe('ClassesPage', () => {
       })),
     })]));
     render(<ClassesPage />);
-    await openFilters();
+    // Week 2 is long finished, so nothing in it can be open — the default has
+    // to widen before a past week can be asked about at all.
+    await showEveryAvailability();
 
     fireEvent.click(screen.getByRole('button', { name: 'Week 2' }));
 
@@ -295,6 +310,7 @@ describe('ClassesPage', () => {
       }],
     })]));
     render(<ClassesPage />);
+    await showEveryAvailability();
 
     // Undated, so it is not claimed to be finished and shows without unfolding.
     fireEvent.click(await screen.findByRole('button', { name: /Add Week 8 to favorites/ }));
@@ -319,6 +335,7 @@ describe('ClassesPage', () => {
       })),
     })]));
     render(<ClassesPage />);
+    await showEveryAvailability();
 
     // Week 2 is starred, so it shows; week 3 is folded.
     expect(await screen.findByText('Week 2')).toBeInTheDocument();
@@ -398,7 +415,8 @@ describe('ClassesPage', () => {
     })]));
     render(<ClassesPage />);
 
-    expect(await screen.findByText('Not listed')).toBeInTheDocument();
+    await showEveryAvailability();
+    expect(await screen.findByText('Not available')).toBeInTheDocument();
     expect(screen.queryByText('Over')).not.toBeInTheDocument();
   });
 
@@ -418,6 +436,7 @@ describe('ClassesPage', () => {
     // A cancelled class has nothing but printed weeks, so folding them would
     // leave an empty card. They show as they are.
     // Two Cancelled marks: the class-level one and the week's own.
+    await showEveryAvailability();
     expect((await screen.findAllByText('Cancelled')).length).toBeGreaterThan(1);
     expect(screen.queryByText('Over')).not.toBeInTheDocument();
   });
@@ -495,11 +514,15 @@ describe('ClassesPage filters', () => {
     render(<ClassesPage />);
     await openFilters();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    // Open is the default, so widen first and come back to it — otherwise
+    // this asserts the starting state rather than the control.
+    fireEvent.click(await screen.findByRole('button', { name: 'Any availability' }));
+    await waitFor(() => expect(screen.getByText('Full Class')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(screen.queryByText('Full Class')).not.toBeInTheDocument());
     expect(screen.getByText('Watercolors for Beginners')).toBeInTheDocument();
-    expect(screen.getByText(/^1 class/)).toBeInTheDocument();
   });
 
   it('keeps a filtered-out session visible but dimmed', async () => {

@@ -32,6 +32,10 @@ export const EMPTY_CLASS_FILTERS: ClassFilterOptions = {
   searchTerm: '',
   selectedCategories: [],
   selectedVenues: [],
+  // Neutral: this is the predicate's "nothing is filtered" object, not the
+  // page's opening state. The page opens on Open, which useClassFilterState
+  // decides — conflating the two makes every caller of filterClasses inherit
+  // a UI choice.
   availability: 'all',
   selectedWeeks: [],
   selectedDays: [],
@@ -231,18 +235,11 @@ export function isSessionOver(session: ClassSession, nowLocal: string): boolean 
 export type ClassLifecycle = 'upcoming' | 'running' | 'ended';
 
 export function classLifecycle(chqClass: ChqClass, nowLocal: string): ClassLifecycle {
-  if (chqClass.sessions.length === 0) {
-    // No session to go on, but the printed schedule may still put this class
-    // ahead of us — ten classes are listed all season with nothing bookable,
-    // and calling those history because the site offers no session today is
-    // how a sailing course that runs to week nine ended up filed under
-    // "over". A cancelled class is the exception: it is not coming.
-    if (chqClass.provenance.status === 'cancelled') return 'ended';
-    const ahead = (chqClass.scheduledWeeks ?? []).some(
-      (w) => w.weekEnd !== null && w.weekEnd >= nowLocal.slice(0, 10),
-    );
-    return ahead ? 'upcoming' : 'ended';
-  }
+  // Turns on sessions, not on the printed schedule. Ten classes are listed
+  // all season with nothing bookable in any week; those are labelled honestly
+  // week by week, but they are not something anyone can start, so they do not
+  // belong above the classes that are.
+  if (chqClass.sessions.length === 0) return 'ended';
 
   // Compared as full local datetimes, not day keys. On a date alone a class
   // starting at four in the afternoon reads as under way all morning, and one
@@ -307,7 +304,7 @@ export function byLifecycle(nowLocal: string) {
  * A cancelled class did not finish, it was pulled. A week still ahead has not
  * finished either — the ticket site simply offers nothing to book in it.
  */
-export type ScheduledWeekState = 'over' | 'cancelled' | 'unlisted';
+export type ScheduledWeekState = 'over' | 'cancelled' | 'unavailable';
 
 export function scheduledWeekState(
   scheduled: ScheduledWeek,
@@ -317,8 +314,8 @@ export function scheduledWeekState(
   if (status === 'cancelled') return 'cancelled';
   // Undated weeks cannot be called past. Off-season that is all of them, and
   // "over" would then be a guess dressed as a fact.
-  if (scheduled.weekEnd === null) return 'unlisted';
-  return scheduled.weekEnd < nowLocal.slice(0, 10) ? 'over' : 'unlisted';
+  if (scheduled.weekEnd === null) return 'unavailable';
+  return scheduled.weekEnd < nowLocal.slice(0, 10) ? 'over' : 'unavailable';
 }
 
 /** Sessions that have not finished yet — what "still running" actually means. */

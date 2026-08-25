@@ -29,7 +29,10 @@ const EMPTY: ClassFilterState = {
   searchTerm: '',
   selectedCategories: [],
   selectedVenues: [],
-  availability: 'all',
+  // Opens on what can actually be joined. Most of the catalog has finished
+  // by late August, and a page that opens on 454 classes nobody can sign up
+  // for buries the sixty that are live.
+  availability: 'open',
   selectedWeeks: [],
   selectedDays: [],
   meetingDays: [],
