@@ -11,6 +11,33 @@
   --day-rail-h: 0px;
 }
 
+/* week-band-ramp:start */
+:root {
+  /*
+   * The week band above the day rail (#274 phase 1).
+   *
+   * 16px rather than iOS's 14pt: web's `WEEK n` is 10px text, and 14px leaves
+   * no room around it at the browser's own minimum font size.
+   *
+   * The two endpoints are duplicated in `lib/utils/railBandPalette.ts`, which
+   * is where `weekBandContrast.test.ts` computes the WCAG and ΔE floors — and
+   * that test reads this block back and asserts the two agree, so the copies
+   * cannot drift. The markers around this block are what it slices on; do not
+   * remove them.
+   */
+  --rail-band-h: 16px;
+  --rail-band-start: #cfd4db;
+  --rail-band-end: #7e858f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rail-band-start: #262b31;
+    --rail-band-end: #565c64;
+  }
+}
+/* week-band-ramp:end */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -200,9 +227,15 @@
 }
 
 /*
- * The filter panel's exit. Compositor-only — `transform` and `opacity`
- * never trigger layout, which is the entire reason the panel is moved out
- * of flow before this runs rather than being collapsed in place.
+ * The filter panel's exit. Compositor-only — `transform` and `opacity` never
+ * trigger layout, which is what lets the list underneath stay perfectly still
+ * for the whole 200ms.
+ *
+ * The panel is `position: fixed` in every state (#274 phase 3), so this class
+ * is the whole of the exit: nothing switches out of flow, no rect is frozen,
+ * and there is no commit rendered `display: none` for the transition to fail
+ * to start from. See `filterHeaderLayout.ts` for why "never in flow" is an
+ * invariant rather than an implementation detail.
  */
 @media (prefers-reduced-motion: no-preference) {
   .filter-panel-exit {

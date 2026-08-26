@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { useCallback, useEffect, useState } from 'react';
 import { render, fireEvent } from '@testing-library/preact';
-import { railTarget, reachableTodayKey, shouldAbandonScroll, stepTargets } from '@/app/dayRailNavigation';
+import { railTarget, reachableTodayKey, shouldAbandonScroll } from '@/app/dayRailNavigation';
 import { EventList } from '@/components/calendar/EventList';
 import { useDayAnchor } from '@/hooks/useDayAnchor';
 import { useFilterPanel } from '@/hooks/useFilterPanel';
@@ -69,37 +69,6 @@ describe('shouldAbandonScroll', () => {
   it('keeps waiting while the expansion has not landed yet', () => {
     expect(shouldAbandonScroll('2026-07-20', w)).toBe(false);
     expect(shouldAbandonScroll('2026-07-01', w)).toBe(false);
-  });
-});
-
-describe('stepTargets', () => {
-  // Every day with an event under the current non-date filters. 07-05 and
-  // 07-08 have none — with ★ Favourites on, or any search or venue filter
-  // that leaves gaps, that is the ordinary case rather than the exception.
-  const eventDays = ['2026-07-04', '2026-07-06', '2026-07-07', '2026-07-10'];
-
-  it('skips days with nothing on them rather than stepping one calendar day', () => {
-    // A raw addDays(±1) from 07-06 targets 07-05 and 07-07. 07-05 mounts no
-    // section, so the pending scroll gives up and the anchor — derived from
-    // scroll position — never moves: pressing again recomputes the identical
-    // dead target, with the chevron still enabled.
-    expect(stepTargets('2026-07-06', eventDays))
-      .toEqual({ prevDay: '2026-07-04', nextDay: '2026-07-07' });
-  });
-
-  it('steps from a day that is not itself an event day', () => {
-    expect(stepTargets('2026-07-08', eventDays))
-      .toEqual({ prevDay: '2026-07-07', nextDay: '2026-07-10' });
-  });
-
-  it('reports no target beyond either end', () => {
-    expect(stepTargets('2026-07-04', eventDays).prevDay).toBeNull();
-    expect(stepTargets('2026-07-10', eventDays).nextDay).toBeNull();
-  });
-
-  it('reports nothing reachable with no anchor or no event days', () => {
-    expect(stepTargets(null, eventDays)).toEqual({ prevDay: null, nextDay: null });
-    expect(stepTargets('2026-07-06', [])).toEqual({ prevDay: null, nextDay: null });
   });
 });
 
@@ -192,10 +161,10 @@ function Harness({ groupedEvents: initialGroups, earlierKey, withFilterPanel }: 
   groupedEvents: DayGroup[]; earlierKey?: string; withFilterPanel?: boolean;
 }) {
   const [groupedEvents, setGroupedEvents] = useState(initialGroups);
-  // `scrolledPast: true` — the panel is only reachable, and the toggle only
-  // rendered, once the reader has scrolled past the in-flow filter card.
-  // That is the state every interaction modelled here happens in.
-  const filterPanel = useFilterPanel({ scrolledPast: true });
+  // No argument: the panel is a fixed overlay in every state now (#274 phase
+  // 3), so there is no "has the reader scrolled past the card yet" question
+  // for the hook to answer.
+  const filterPanel = useFilterPanel();
   const dayKeysList = groupedEvents.map(g => g.key);
   const bounds = { startDay: dayKeysList[0], endDay: dayKeysList[dayKeysList.length - 1] };
   const { scrollToDay, cancelHold } = useDayAnchor(dayKeysList);
@@ -407,27 +376,26 @@ describe('composition: a day-chip tap dismisses the panel and still navigates', 
     document.documentElement.style.removeProperty('--day-rail-h');
   });
 
-  // A chip tap dismisses the panel AND navigates. Both correct scroll. If
-  // they fought, the reader would land in neither place — exactly the shape
-  // of the bug that cost the preceding branch a review round, when
-  // useDayAnchor's hold and EventList's prepend settle both called scrollBy
-  // on one shared resize (see the two tests above).
+  // A chip tap dismisses the panel AND navigates. Only ONE of them corrects
+  // scroll now, and that is the point of the test.
   //
-  // **What this pins, honestly: that the two compose — both corrections
-  // happen, exactly once each, dismissal first — through a real
-  // `useFilterPanel`, a real `EventList` and a real `useDayAnchor` wired the
-  // way page.tsx wires them.** That is a worthwhile end-to-end smoke test,
-  // and it is the whole of the claim.
+  // Until #274 phase 3 both did: the panel was in-flow content, so closing it
+  // removed real height above the reader and `useFilterPanel` corrected for
+  // it, racing `useDayAnchor`'s own correction on the same tap. Two
+  // mechanisms calling `scrollBy` on one interaction is the exact bug shape
+  // that cost the preceding branch a review round (see the two tests above),
+  // so the composition was pinned as "both, once each, dismissal first".
   //
-  // It is NOT a proof of the ordering *mechanism*, and an earlier version of
-  // this comment said it was. Both mechanisms it named survive being
-  // removed: switching the gesture listener from `mousedown` to `click`
-  // still yields `['dismiss','navigate']`, because the window-level capture
-  // listener runs before the chip's own bubble-phase handler either way; and
-  // demoting the dismissal's correction from `useLayoutEffect` to a passive
-  // `useEffect` still yields it, because that effect is queued from the
-  // earlier commit and flushes before the navigation's own. Proving the
-  // mechanism would need a much finer harness than this earns.
+  // The panel is a fixed overlay now, so closing it changes no layout and it
+  // corrects nothing. The race is gone by construction rather than by
+  // ordering, and this test is what says so: the dismissal must contribute NO
+  // `scrollBy`, and the navigation must still contribute exactly its own.
+  //
+  // The day section is still rigged to "move" with the panel's open/hidden
+  // class — the drift a real Chromium build measured back when the panel was
+  // in flow. That is deliberate and adversarial: it is the input under which
+  // the old code demonstrably corrected, so a correction re-added anywhere in
+  // this composition shows up here as an extra entry rather than as nothing.
   //
   // Explicit timeout: same integration-test cost as the three tests above
   // (~60 EventCards from a real EventList + useDayAnchor render), plus a
@@ -437,7 +405,7 @@ describe('composition: a day-chip tap dismisses the panel and still navigates', 
   // the evidence that matters: a loaded, 2-core CI runner with coverage
   // instrumentation is what timed a test in this file out before its
   // fixture was shrunk, and this test renders the identical fixture.
-  it('records both corrections exactly once, dismissal first', { timeout: 15000 }, () => {
+  it('dismisses without correcting scroll, and still navigates', { timeout: 15000 }, () => {
     installIntersectionObserverMock();
     installResizeObserverMock();
     document.documentElement.style.setProperty('--day-rail-h', '50px');
@@ -463,19 +431,17 @@ describe('composition: a day-chip tap dismisses the panel and still navigates', 
     // pass with `revealDay` doing nothing.
     expect(container.querySelector(`[${DAY_SECTION_ATTR}="2026-07-12"]`)).toBeNull();
 
-    // Arrange: the panel is open. (Day sections all read jsdom's default
-    // zero top here, so `topmostVisibleDaySection` finds nothing >= the
-    // rail's 50px threshold and this correction is a no-op — nothing to
-    // clear from `order`.)
+    // Arrange: the panel is open. Opening it must already correct nothing.
     const toggle = getByRole('button', { name: 'Filters' });
     fireEvent.click(toggle);
     expect(order).toEqual([]);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
 
-    // Track 2026-07-01 (the topmost mounted day section) against the
-    // panel's own open/hidden class, the same way `useFilterPanel.test.tsx`
-    // does — a stand-in for the real Chromium-measured drift a panel
-    // leaving the layout produces, giving the dismissal's correction a
-    // real, nonzero, distinguishable delta once the tap below closes it.
+    // Track 2026-07-01 (the topmost mounted day section) against the panel's
+    // own open/hidden class, the same way `useFilterPanel.test.tsx` does —
+    // the Chromium-measured drift an in-flow panel used to produce. It is
+    // what a re-added correction would fire on, and it is nonzero and
+    // distinguishable from the navigation's own -50.
     const panel = document.getElementById(toggle.getAttribute('aria-controls')!)!;
     document.querySelector<HTMLElement>(`[${DAY_SECTION_ATTR}="2026-07-01"]`)!
       .getBoundingClientRect = () => ({ top: panel.classList.contains('hidden') ? 236 : 517 }) as DOMRect;
@@ -490,8 +456,10 @@ describe('composition: a day-chip tap dismisses the panel and still navigates', 
     fireEvent.mouseDown(chip);
     fireEvent.click(chip);
 
-    // Both corrections happened, once each, dismissal first — neither
-    // swallowed by the other, neither run twice.
-    expect(order).toEqual(['dismiss', 'navigate']);
+    // The panel closed, the list navigated, and the ONLY scroll correction
+    // was the navigation's. A 'dismiss' entry here means something is
+    // correcting for a height change that no longer happens.
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(order).toEqual(['navigate']);
   });
 });

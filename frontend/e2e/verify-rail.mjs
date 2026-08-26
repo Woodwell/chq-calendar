@@ -77,6 +77,28 @@ async function newPage({ width = 900, height = 900, storage } = {}) {
   return page;
 }
 
+/**
+ * Open the filter panel, so the scope buttons inside it are in the
+ * accessibility tree.
+ *
+ * Required since #274 phase 3: the panel is a fixed overlay that is
+ * `display: none` while closed, and the funnel that opens it moved from the
+ * day rail into the site header. `getByRole` walks the accessibility tree, so
+ * a control inside a hidden panel is correctly invisible to it — a check that
+ * reaches for `All Season` without this times out rather than failing with a
+ * useful message.
+ *
+ * A DOM click, not `locator.click()`: Playwright scrolls an element into view
+ * before clicking it, and that scroll is a real one the app cannot know is
+ * ours — it would hide the header out from under the funnel.
+ */
+async function openFilters(page) {
+  await page.evaluate(() => {
+    document.querySelector('[data-site-header] button[aria-label="Filters"]')?.click();
+  });
+  await page.waitForTimeout(400);
+}
+
 const railChips = p => p.$$eval('[data-day-rail] [data-chip]', els => els.map(e => e.dataset.chip));
 
 /**
@@ -145,6 +167,7 @@ const railHeight = p => p.evaluate(() =>
 // ---------------------------------------------------------------- 1. scopes
 {
   const page = await newPage();
+  await openFilters(page);
   const names = await page.$$eval('button', els => els.map(e => e.textContent.trim()));
   const wanted = ['Now', 'Today', 'All Season', 'All Year'];
   check('1a four scopes present', wanted.every(w => names.includes(w)), names.filter(n => wanted.includes(n)).join(', '));
@@ -156,6 +179,7 @@ const railHeight = p => p.evaluate(() =>
 // ------------------------------------------------------- 2. mutual exclusion
 {
   const page = await newPage();
+  await openFilters(page);
   await page.getByRole('button', { name: 'All Season', exact: true }).click();
   await page.waitForTimeout(300);
   const pressed = await page.getByRole('button', { name: 'All Season', exact: true }).getAttribute('aria-pressed');
@@ -291,21 +315,82 @@ for (const scrolled of [false, true]) {
   await page.close();
 }
 
-// ---------------------------------------------------------------- 10. chevrons
+// ------------------------------------------- 10. narrow-phone chip count
+//
+// #274 phase 2's follow-up: an iPhone 13 mini (375pt) user reported the day
+// strip down to one full chip and two slivers. Measured cause: the two
+// chevrons (`min-w-11` each) plus a text-sized `⟳ Now` (no `min-w-11`, the
+// rail's one non-square control) were eating ~148px of a 375px rail before a
+// single chip was drawn. Both chevrons are now gone and `⟳ Now` is
+// icon-only, which is what checks 10a-10c used to guard directly — they
+// asserted the chevrons existed and moved the anchor, which no longer means
+// anything once the controls are gone.
+//
+// This replaces them with a check on the property the user actually cares
+// about: how much of a 375pt rail the day strip itself gets. Not hard-coded
+// to 44px — a chip's width is read from the rendered DOM, so this keeps
+// working if the chip's own size is ever changed on purpose. Falsified by
+// temporarily adding a wide control back to the rail and confirming this
+// drops below 4 (see the narrow-phone-rail plan doc and commit history for
+// that run).
+//
+// Measured with every optional control present, not on the fresh, unscrolled
+// landing state: a first load has the anchor on today, so `⟳ Now` is hidden,
+// which understates real crowding and would leave this check unable to catch
+// the very regression it exists for. A far chip tap moves the anchor off
+// today, revealing it (same as check 11).
+//
+// **Threshold raised from 4 to 5 in #274 phase 3**, and the raise is the
+// point. That phase moved the Filters funnel off the rail and into the site
+// header, freeing its 44px plus a 4px gutter: measured 191px of strip (4.06
+// chips) before, 239px (5.06) after. A threshold left at 4 would be a guard
+// that had stopped guarding — it would pass with the funnel put straight back
+// and the reader down to four chips again, which is the state the bug report
+// was about.
+//
+// `filtersVisible` is asserted rather than merely reported for the same
+// reason: it is now a claim about where that control lives, not a note about
+// which controls happened to be on screen.
 {
-  const page = await newPage();
-  const before = await anchorChip(page);
-  const next = await page.$('[data-day-rail] button:not([data-chip]):nth-of-type(2)');
-  const chevrons = await page.$$eval('[data-day-rail] button:not([data-chip])',
-    els => els.map(e => ({ label: e.getAttribute('aria-label'), disabled: e.hasAttribute('disabled') })));
-  check('10a two chevrons, labelled by target', chevrons.length >= 2,
-    chevrons.map(c => `${c.label}${c.disabled ? ' [disabled]' : ''}`).join(' | '));
-  check('10b chevron labels are not directional when enabled',
-    chevrons.filter(c => !c.disabled).every(c => !/the (next|previous) day/.test(c.label)),
-    chevrons.filter(c => !c.disabled).map(c => c.label).join(' | '));
-  if (next) { await next.click(); await page.waitForTimeout(1200); }
-  const after = await anchorChip(page);
-  check('10c forward chevron moves the anchor', before !== after, `${before} → ${after}`);
+  const page = await newPage({ width: 375, height: 812 });
+  const far = await pickFarTarget(page);
+  await page.evaluate(k => document.querySelector(`[data-day-rail] [data-chip="${k}"]`).click(), far);
+  await page.waitForTimeout(1200);
+  await page.mouse.wheel(0, 2000);
+  await page.waitForTimeout(700);
+  const { stripWidth, chipWidth, pitch, nowVisible, filtersVisible } = await page.evaluate(() => {
+    const strip = document.querySelector('[data-rail-strip]');
+    const chips = [...document.querySelectorAll('[data-day-rail] [data-chip]')];
+    const [a, b] = chips;
+    return {
+      stripWidth: strip ? strip.getBoundingClientRect().width : 0,
+      chipWidth: a ? a.getBoundingClientRect().width : 0,
+      // The distance from one chip's left edge to the next one's — the real
+      // repeat unit, chip plus gutter. MEASURED from two adjacent chips rather
+      // than read from `RAIL_CHIP_GUTTER_PX`, for the same reason the chip
+      // width is measured: a constant the browser turned out not to honour is
+      // exactly what this check exists to catch.
+      pitch: a && b
+        ? b.getBoundingClientRect().left - a.getBoundingClientRect().left
+        : 0,
+      nowVisible: !!document.querySelector('[data-day-rail] button[aria-label="Go to today"]'),
+      filtersVisible: !!document.querySelector('[data-day-rail] button[aria-label="Filters"]'),
+    };
+  });
+  // How many chips actually FIT, which is not `strip / chipWidth`: chips are
+  // laid out with a gutter between them, so n of them occupy
+  // `n*chip + (n-1)*gutter`. Dividing by the chip alone silently credits the
+  // strip with the gutters it also has to pay for, and overstates the count by
+  // roughly 8% at these sizes — enough to let the guard read 4.0 while the
+  // reader can see fewer than four. Solving that inequality for n gives
+  // `(strip + gutter) / pitch`.
+  const gutter = pitch > 0 && chipWidth > 0 ? pitch - chipWidth : 0;
+  const chipsWorth = pitch > 0 ? (stripWidth + gutter) / pitch : 0;
+  check('10 day strip holds at least 5 chips at 375pt, with no funnel on the rail',
+    chipsWorth >= 5 && !filtersVisible,
+    `strip=${stripWidth.toFixed(1)}px chip=${chipWidth.toFixed(1)}px ` +
+    `gutter=${gutter.toFixed(1)}px pitch=${pitch.toFixed(1)}px ≈ ${chipsWorth.toFixed(2)} chips ` +
+    `(⟳Now=${nowVisible} Filters=${filtersVisible})`);
   await page.close();
 }
 
@@ -563,19 +648,26 @@ for (const [label, width, zoom] of [['320px', 320, 1], ['200% zoom', 900, 2]]) {
   const controls = await page.evaluate(() => {
     const rail = document.querySelector('[data-day-rail]');
     if (!rail) return null;
-    return [...rail.querySelectorAll('button')].map(el => {
-      const r = el.getBoundingClientRect();
-      return {
-        name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24),
-        w: Math.round(r.width), h: Math.round(r.height),
-      };
-    });
+    return [...rail.querySelectorAll('button')]
+      // The band is 16px tall by design — a full-height band would dominate a
+      // rail whose whole job is the chips. It is carved out here rather than
+      // silently passing because nothing is reachable ONLY through it: every
+      // week is also reachable from its own day chips, which 15a measures at
+      // the full 44px, and 15b below is what keeps that true.
+      .filter(el => !el.hasAttribute('data-week-band-button'))
+      .map(el => {
+        const r = el.getBoundingClientRect();
+        return {
+          name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24),
+          w: Math.round(r.width), h: Math.round(r.height),
+        };
+      });
   });
   if (!controls?.length) {
-    check('15 rail tap targets meet the 44px minimum', false, 'no rail controls found');
+    check('15a rail tap targets meet the 44px minimum', false, 'no rail controls found');
   } else {
     const under = controls.filter(c => c.w < 44 || c.h < 44);
-    check('15 every rail control meets the 44px minimum',
+    check('15a every rail control meets the 44px minimum',
       under.length === 0,
       under.length
         ? `${under.length}/${controls.length} under: ` +
@@ -583,6 +675,451 @@ for (const [label, width, zoom] of [['320px', 320, 1], ['200% zoom', 900, 2]]) {
         : `${controls.length} controls, smallest ` +
           `${Math.min(...controls.map(c => c.w))}x${Math.min(...controls.map(c => c.h))}`);
   }
+
+  // The carve-out's premise, asserted rather than approximated: the band's
+  // 16px button is never the ONLY way to reach the day it goes to. Every
+  // reachable week names a destination day, and that day's own chip is a
+  // full-size control — so a thumb that cannot hit the band has a 44px route
+  // to exactly the same place.
+  //
+  // This needs the destination in the DOM, which is why the labelled band
+  // button carries `data-week-band-target`. Deriving it in the browser instead
+  // would mean re-implementing `weekBandDestinations` in the check — a second
+  // copy of the rule, which is the thing this whole design keeps refusing to
+  // have.
+  const carveOut = await page.evaluate(() => {
+    const rail = document.querySelector('[data-day-rail]');
+    const targets = [...rail.querySelectorAll('[data-week-band-button]')]
+      .filter(b => b.getAttribute('aria-disabled') !== 'true')
+      .map(b => b.dataset.weekBandTarget)
+      .filter(Boolean);
+    const missing = targets.filter(day => {
+      const chip = rail.querySelector(`[data-chip="${day}"]`);
+      if (!chip) return true;
+      const r = chip.getBoundingClientRect();
+      return r.width < 44 || r.height < 44;
+    });
+    return { offered: targets.length, missing };
+  });
+  check('15b every week the band offers has a 44px chip for the same day',
+    carveOut.offered > 0 && carveOut.missing.length === 0,
+    carveOut.offered === 0
+      ? 'no reachable week band button found'
+      : `${carveOut.offered} weeks offered, ${carveOut.missing.length} without a full-size chip` +
+        (carveOut.missing.length ? `: ${carveOut.missing.join(', ')}` : ''));
+  await page.close();
+}
+
+// ------------------------------------------------------------ 16. the week band
+//
+// Alignment is claimed to be structural — the band cell and the chip are
+// block-level children of one flex column, so the cell's width EQUALS the
+// chip's rather than matching it. A structural claim is still worth measuring
+// once: `w-max`, `shrink-0` and a stray `min-width` on a future descendant can
+// all break "equals" without breaking the markup.
+{
+  const page = await newPage();
+  const geometry = await page.evaluate(() => {
+    const rail = document.querySelector('[data-day-rail]');
+    if (!rail) return null;
+    const columns = [...rail.querySelectorAll('[data-rail-content] > [data-rail-column]')];
+    const cells = columns.map(col => {
+      const cell = col.querySelector('[data-band-cell]');
+      const chip = col.querySelector('[data-chip]');
+      const run = col.querySelector('[data-band-run]');
+      const bars = [...col.querySelectorAll('[data-band-bar]')].map(b => {
+        const r = b.getBoundingClientRect();
+        return {
+          left: r.left, right: r.right,
+          opacity: Number(getComputedStyle(b).opacity),
+          // Ground truth for "same week", independent of the geometry 16b
+          // tests: the ramp step is a pure function of week number and
+          // `rampPercent` rounds to whole percent, so two touching bars in
+          // the same week resolve to byte-identical computed colour.
+          color: getComputedStyle(b).backgroundColor,
+        };
+      });
+      return {
+        day: chip?.dataset.chip ?? null,
+        cellW: cell?.getBoundingClientRect().width ?? null,
+        chipW: chip?.getBoundingClientRect().width ?? null,
+        runLeft: run?.getBoundingClientRect().left ?? null,
+        runRight: run?.getBoundingClientRect().right ?? null,
+        cellLeft: cell?.getBoundingClientRect().left ?? null,
+        cellRight: cell?.getBoundingClientRect().right ?? null,
+        bars,
+      };
+    });
+    const pill = document.querySelector('[data-rail-pill]')?.getBoundingClientRect();
+    const bandBottom = cells[0] ? document.querySelector('[data-band-cell]').getBoundingClientRect().bottom : null;
+    const labels = [...rail.querySelectorAll('[data-week-band-button]')]
+      .map(b => b.dataset.weekBandButton);
+    // The copy layer must lay out its CHIP BOXES pixel-identically to the
+    // real row — that is what a highlighted digit is clipped against. The
+    // COLUMNS themselves are `absolute inset-0` + `items-stretch`, so their
+    // own rects always match regardless of what is inside them; comparing
+    // columns rather than chip boxes would pass even if the copy's band
+    // spacer drifted from `--rail-band-h` and pushed every chip below it
+    // out of line with the real row.
+    const copyChipBoxes = [...rail.querySelectorAll('[data-rail-clip] > [data-rail-column]')]
+      .map(col => col.querySelector(':scope > div:not([data-band-spacer])')?.getBoundingClientRect() ?? null);
+    const realChipBoxes = columns.map(col => col.querySelector('[data-chip]')?.getBoundingClientRect() ?? null);
+    const worstCopyDelta = Math.max(0, ...realChipBoxes.map((r, i) => {
+      const c = copyChipBoxes[i];
+      if (!r || !c) return 999;
+      return Math.max(
+        Math.abs(r.left - c.left), Math.abs(r.width - c.width),
+        Math.abs(r.top - c.top), Math.abs(r.height - c.height),
+      );
+    }));
+    return { cells, pill, bandBottom, labels, worstCopyDelta, columns: columns.length };
+  });
+
+  if (!geometry) {
+    check('16 week band present', false, 'no rail');
+  } else {
+    const { cells, pill, bandBottom, labels, worstCopyDelta } = geometry;
+    const widthDrift = Math.max(...cells.map(c => Math.abs((c.cellW ?? 0) - (c.chipW ?? -1))));
+    check('16a every band cell is exactly its chip\'s width', widthDrift < 0.5,
+      `worst ${widthDrift.toFixed(2)}px over ${cells.length} columns`);
+
+    // A week is drawn as ONE run: inside a week the fill bridges the gutter,
+    // and the only break in the whole band is the seam through the Saturday
+    // two weeks share. Measured off the OUTER bar on each side of the
+    // gutter — the last bar of the column to the left, the first bar of the
+    // column to the right — so a boundary Saturday's split cell is included
+    // rather than excluded: the join between a weekday and its boundary
+    // Saturday is the riskiest geometry in the design, and a
+    // `bars.length === 1` filter would never measure it. "Same week" is
+    // ground-truthed independently, off the bars' own computed colour (a
+    // pure function of week number, rounded to whole percent — see above),
+    // so the count asserted below is not just "at least one gutter touched".
+    const gutters = cells.slice(0, -1).map((c, i) => {
+      const next = cells[i + 1];
+      if (c.bars.length === 0 || next.bars.length === 0) return { touching: false, sameWeek: false };
+      const leftEdge = c.bars[c.bars.length - 1];
+      const rightEdge = next.bars[0];
+      return {
+        touching: Math.abs(leftEdge.right - rightEdge.left) < 0.5,
+        sameWeek: leftEdge.color === rightEdge.color,
+      };
+    });
+    const bridged = gutters.filter(g => g.touching).length;
+    const sameWeekGutters = gutters.filter(g => g.sameWeek).length;
+    check('16b the fill bridges the gutters inside a week',
+      bridged > 0 && bridged === sameWeekGutters,
+      `${bridged} bridged of ${sameWeekGutters} same-week gutters`);
+
+    const split = cells.filter(c => c.bars.length === 2);
+    const seams = split.map(c => c.bars[1].left - c.bars[0].right);
+    check('16c a boundary Saturday is split, and only there',
+      split.length > 0 && seams.every(s => s > 0.5 && s < 6),
+      `${split.length} split days, seams ${seams.map(s => s.toFixed(1)).join(', ')}`);
+
+    check('16d WEEK n appears at most once per week',
+      labels.length === new Set(labels).size && labels.length > 0,
+      `${labels.length} labels: ${labels.join(',')}`);
+
+    // Risk 1 from the design, measured rather than assumed.
+    check('16e the highlight pill does not paint over the band',
+      !!pill && !!bandBottom && pill.top >= bandBottom - 0.5,
+      pill ? `pill.top=${pill.top.toFixed(1)} band.bottom=${bandBottom.toFixed(1)}` : 'no pill');
+
+    // Risk 1's other half: the two layers must stay in step, or the seam the
+    // shared chip-box class exists to prevent comes back one level up.
+    check('16f the clipped copy lays out column for column', worstCopyDelta < 0.5,
+      `worst ${worstCopyDelta.toFixed(2)}px`);
+  }
+  await page.close();
+}
+
+// ------------------------------------------- 17. a band tap navigates
+{
+  const page = await newPage();
+  const before = await anchorChip(page);
+  const jumped = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('[data-week-band-button]')]
+      .filter(b => b.getAttribute('aria-disabled') !== 'true');
+    // The furthest reachable week from wherever the rail opened, so the check
+    // cannot pass on a one-chip move.
+    const target = buttons[buttons.length - 1];
+    if (!target) return null;
+    target.click();
+    return { week: target.dataset.weekBandButton, label: target.getAttribute('aria-label') };
+  });
+  if (!jumped) {
+    check('17a a band tap navigates', false, 'no reachable week band button');
+  } else {
+    await page.waitForTimeout(700);
+    const after = await anchorChip(page);
+    check('17a a band tap navigates', !!after && after !== before, `${before} → ${after}`);
+    // Named by destination, and the destination is where it actually landed.
+    const named = /Go to Week \d+, (opens|first events) (.+), \d+ events?$/.exec(jumped.label ?? '');
+    check('17b the band names the day it actually lands on',
+      !!named && !!after && jumped.label.includes(new Date(`${after}T12:00:00`)
+        .toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric' })),
+      `${jumped.label} → landed ${after}`);
+  }
+  await page.close();
+}
+
+// ------------------------------------------- 18. an unreachable week is inert
+//
+// The default, unfiltered feed fills every in-season week, so this check has
+// to construct the unreachable state itself rather than hope for one. It is
+// narrowed through PERSISTED FILTER STATE, the same route check 3 uses for
+// 'this-week' — a storage seed reaches `navMatchingEvents` with no dependency
+// on the filter panel's own markup, which the drive-the-UI alternative would
+// have.
+//
+// The term is 'williamsburg': Colonial Williamsburg's themed week-6
+// residency, a whole week of named partner programming rather than one
+// event a routine feed refresh could drop, which is what "stable against
+// feed churn" means here — not that the exact match count is fixed (it
+// isn't: the local dev fixture carries 4 matching events, live production
+// 9, both entirely inside week 6), but that the THEME is a fixture of the
+// season rather than a coincidence of today's snapshot. It leaves every
+// other in-season week with zero matches, which is the unreachable state
+// 18a/18b need, and it never fully empties the reachable side either (see
+// 18-pre), which is what keeps 18a from going vacuous.
+//
+// dateFilter is seeded to 'all' ("All Year"), not left at the default
+// 'next': week 6 is in the past relative to 'now' this season, so a
+// 'next'-scoped list would show zero matching events, the app would render
+// the generic empty state, and `enterList`'s EMPTY branch throws before this
+// check gets to assert anything.
+{
+  const page = await newPage({
+    storage: ['chq-calendar-user-state', JSON.stringify({
+      dateFilter: 'all', selectedWeeks: [], searchTerm: 'williamsburg',
+      selectedTags: [], selectedLocations: [], expandedDescriptions: [],
+      recentLocations: [], recentCategories: [], showFavoritesOnly: false,
+      lastSaved: Date.now(),
+    })],
+  });
+  const state = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('[data-week-band-button]')];
+    const disabled = buttons.filter(b => b.getAttribute('aria-disabled') === 'true');
+    const reachable = buttons.filter(b => b.getAttribute('aria-disabled') !== 'true');
+    return {
+      count: disabled.length,
+      reachableCount: reachable.length,
+      labels: disabled.map(b => b.getAttribute('aria-label')),
+      // The FILL is faded; the label is not. Fading the label is what took an
+      // empty iOS chip's text to a sampled ~3.7:1.
+      fillOpacity: disabled[0]
+        ? Number(getComputedStyle(disabled[0].closest('[data-band-cell]')
+            .querySelector('[data-band-bar]')).opacity)
+        : null,
+      labelOpacity: disabled[0]
+        ? Number(getComputedStyle(disabled[0].querySelector('span')).opacity)
+        : null,
+    };
+  });
+  // The check now controls its own precondition — a search that failed to
+  // narrow anything is a FAILURE of this check, not a reason to stand down.
+  // Both counts are asserted: zero unreachable is the original gap, and zero
+  // reachable would mean the term matched nothing at all (an empty
+  // `weekDestinations` map dims nothing, by design — see WeekBandCell — so a
+  // term with no matches would make 18a vacuously true instead of failing).
+  check('18-pre the search term narrows to exactly one theme week',
+    state.count > 0 && state.reachableCount > 0,
+    `${state.reachableCount} reachable, ${state.count} unreachable`);
+  check('18a an unreachable week says so rather than offering a trip',
+    state.count > 0 && state.labels.every(l => /^Week \d+, no events$/.test(l ?? '')),
+    state.labels.slice(0, 3).join(' | ') || 'no unreachable week found');
+  check('18b the fill is faded and the label is not',
+    state.fillOpacity !== null && state.fillOpacity < 1 && state.labelOpacity === 1,
+    `fill=${state.fillOpacity} label=${state.labelOpacity}`);
+  await page.close();
+}
+
+// ------------------------------------------- 19. axe over the rail
+//
+// `aria-hidden-focus` is the rule this design has to prove clean, not assume:
+// ~64 decorative segments carry the band's pointer handlers, and every one of
+// them is `aria-hidden`. A single focusable descendant among them would put a
+// hidden control in the tab order.
+{
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const page = await newPage();
+  await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+  const results = await page.evaluate(async () => {
+    const run = await window.axe.run('[data-day-rail]', {
+      runOnly: { type: 'rule', values: [
+        'aria-hidden-focus', 'button-name', 'aria-allowed-attr', 'nested-interactive',
+      ] },
+    });
+    return run.violations.map(v => `${v.id} x${v.nodes.length}`);
+  });
+  check('19 axe is clean over the rail with the band present',
+    results.length === 0, results.join(', ') || 'no violations');
+  await page.close();
+}
+
+// ------------------------------------------- 20. the week chooser
+//
+// The acceptance criterion for this phase, measured rather than asserted: any
+// week of the season reachable in TWO interactions from anywhere in the list.
+// The rail is sticky, so the trigger is on screen at any scroll position — that
+// is the property this opens from a deep scroll to test, because it is the one
+// the whole design rests on and the one a sticky regression would silently take
+// away (a wrapper div gave `position: sticky` zero travel in #238, and eleven
+// green task reviews missed it).
+{
+  const page = await newPage({ width: 390, height: 844 });
+  // Deep enough that the top of the document is nowhere near the viewport.
+  await page.mouse.wheel(0, 6000);
+  await page.waitForTimeout(700);
+  const before = await anchorChip(page);
+
+  const triggerBox = await page.evaluate(() => {
+    const el = document.querySelector('[data-week-chooser-trigger]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { top: r.top, w: Math.round(r.width), h: Math.round(r.height),
+             onScreen: r.top >= 0 && r.bottom <= window.innerHeight };
+  });
+  check('20a the chooser is on screen after a deep scroll',
+    !!triggerBox && triggerBox.onScreen,
+    triggerBox ? `top=${triggerBox.top.toFixed(0)} ${triggerBox.w}x${triggerBox.h}` : 'no trigger');
+
+  await page.click('[data-week-chooser-trigger]');
+  await page.waitForSelector('[data-week-chooser-popover]', { timeout: 3000 });
+  const opened = await page.evaluate(() => {
+    const pop = document.querySelector('[data-week-chooser-popover]');
+    const r = pop.getBoundingClientRect();
+    return {
+      cells: pop.querySelectorAll('[data-week-cell]').length,
+      // Nine 44px cells in a ROW would be 396px, wider than this 390px viewport.
+      // The 3x3 is what makes the control fit a phone at all, so its box is the
+      // measurement, not its class list.
+      width: Math.round(r.width),
+      withinViewport: r.left >= 0 && r.right <= window.innerWidth
+        && r.top >= 0 && r.bottom <= window.innerHeight,
+    };
+  });
+  check('20b the popover holds every week of the season', opened.cells === 9,
+    `${opened.cells} cells`);
+  check('20c the popover fits a 390px phone', opened.withinViewport && opened.width < 390,
+    `${opened.width}px wide, within=${opened.withinViewport}`);
+
+  // The jump itself: the furthest reachable week from wherever the rail opened,
+  // so the check cannot pass on a one-week nudge.
+  const jumped = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('[data-week-cell]')]
+      .filter(c => c.getAttribute('aria-disabled') !== 'true');
+    const target = cells[cells.length - 1];
+    if (!target) return null;
+    target.click();
+    return { week: target.dataset.weekCell, day: target.dataset.weekCellTarget,
+             label: target.getAttribute('aria-label') };
+  });
+  if (!jumped) {
+    check('20d a chooser tap navigates', false, 'no reachable week cell');
+  } else {
+    await page.waitForTimeout(900);
+    const after = await anchorChip(page);
+    check('20d a chooser tap navigates', !!after && after !== before,
+      `${before} → ${after} (week ${jumped.week})`);
+    // Where it SAID it would go, not merely somewhere. The rail's standing rule:
+    // a control names its destination, and the destination is where it lands.
+    check('20e it lands on the day it named', after === jumped.day,
+      `named ${jumped.day}, landed ${after}`);
+    const closed = await page.$$('[data-week-chooser-popover]');
+    check('20f the popover closes on a choice', closed.length === 0,
+      `${closed.length} popovers still open`);
+
+    // The lit cell followed. This is the trigger's whole job — position in the
+    // season, spatially — and it is downstream of `anchorDay`, which is
+    // scroll-derived, so nothing but a real scroll can test it.
+    const lit = await page.evaluate(() => {
+      const cells = [...document.querySelectorAll('[data-week-chooser-cell][data-lit]')];
+      return { count: cells.length, week: cells[0]?.dataset.weekChooserCell ?? null };
+    });
+    check('20g the lit cell followed the jump',
+      lit.count === 1 && lit.week === jumped.week,
+      `lit=${lit.week} expected=${jumped.week} (${lit.count} lit)`);
+  }
+  await page.close();
+}
+
+// ------------------------------------------- 20h. an unreachable week is inert
+//
+// Same storage seed as check 18, and for the same reason: the default feed
+// fills every in-season week, so this state has to be CONSTRUCTED rather than
+// hoped for. A check that never creates the state it names can only skip.
+// 'williamsburg' leaves week 6 reachable and every other in-season week empty,
+// in both the local dev fixture and live production.
+{
+  const page = await newPage({
+    width: 390, height: 844,
+    storage: ['chq-calendar-user-state', JSON.stringify({
+      dateFilter: 'all', selectedWeeks: [], searchTerm: 'williamsburg',
+      selectedTags: [], selectedLocations: [], expandedDescriptions: [],
+      recentLocations: [], recentCategories: [], showFavoritesOnly: false,
+      lastSaved: Date.now(),
+    })],
+  });
+  await page.click('[data-week-chooser-trigger]');
+  await page.waitForSelector('[data-week-chooser-popover]', { timeout: 3000 });
+  const state = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('[data-week-cell]')];
+    const dim = cells.filter(c => c.getAttribute('aria-disabled') === 'true');
+    return {
+      dim: dim.length,
+      reachable: cells.length - dim.length,
+      labels: dim.map(c => c.getAttribute('aria-label')),
+      fillOpacity: dim[0]
+        ? Number(getComputedStyle(dim[0].querySelector('[data-week-cell-fill]')).opacity)
+        : null,
+      numberOpacity: dim[0]
+        ? Number(getComputedStyle(dim[0].querySelector('[data-week-cell-number]')).opacity)
+        : null,
+    };
+  });
+  // Both counts, as in 18-pre: zero unreachable is the original gap, and zero
+  // reachable would mean the term matched nothing at all and 20h passes
+  // vacuously.
+  check('20h-pre the seed narrows to exactly one theme week',
+    state.dim > 0 && state.reachable > 0,
+    `${state.reachable} reachable, ${state.dim} unreachable`);
+  check('20h an unreachable week in the grid says so rather than offering a trip',
+    state.dim > 0 && state.labels.every(l => /^Week \d+, no events$/.test(l ?? '')),
+    state.labels.slice(0, 3).join(' | ') || 'none');
+  check('20i the grid fades the fill and not the numeral',
+    state.fillOpacity !== null && state.fillOpacity < 1 && state.numberOpacity === 1,
+    `fill=${state.fillOpacity} number=${state.numberOpacity}`);
+  await page.close();
+}
+
+// ------------------------------------------- 21. axe over the open chooser
+//
+// This check scopes itself to `[data-week-chooser-popover]`: the `role="dialog"`
+// containing nine controls, portalled to `document.body`. Check 19 already
+// audits the trigger itself — including its `aria-hidden` icon of nine
+// decorative spans — because the trigger lives inside `[data-day-rail]`, which
+// is check 19's scope. Only the portalled popover is outside that scope and
+// needs its own pass here.
+{
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const page = await newPage();
+  await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+  await page.click('[data-week-chooser-trigger]');
+  await page.waitForSelector('[data-week-chooser-popover]', { timeout: 3000 });
+  const results = await page.evaluate(async () => {
+    const run = await window.axe.run('[data-week-chooser-popover]', {
+      runOnly: { type: 'rule', values: [
+        'aria-hidden-focus', 'button-name', 'aria-allowed-attr',
+        'nested-interactive', 'aria-dialog-name', 'aria-required-children',
+      ] },
+    });
+    return run.violations.map(v => `${v.id} x${v.nodes.length}`);
+  });
+  check('21 axe is clean over the open week chooser',
+    results.length === 0, results.join(', ') || 'no violations');
   await page.close();
 }
 
