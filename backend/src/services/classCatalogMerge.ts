@@ -25,7 +25,7 @@
  * no opinions left to get wrong.
  */
 import type { CatalogClass, CatalogFile } from '../types/catalog';
-import type { ChqClass, ClassStatus, ScheduledWeek } from '../types/classes';
+import type { ChqClass, ClassSession, ClassStatus, ScheduledWeek } from '../types/classes';
 
 export interface MergeInput {
   /** The compiled catalog, or undefined for a season with none. */
@@ -113,6 +113,34 @@ export function statusForAbsent(
   const end = weekEnds.get(lastWeek);
   if (!end) return 'unobserved';
   return end > crawlDate ? 'cancelled' : 'unobserved';
+}
+
+/**
+ * Places a session whose "Week N" label could not be read.
+ *
+ * `parseClassDetail` writes `week: 0` when the label is unreadable, which is
+ * not a season week and behaves like one everywhere downstream: two such
+ * sessions on a class collapse to a single card row keyed on the same week,
+ * they share a favourite key, and a `0` appears in the week picker.
+ *
+ * The season calendar the build recorded can place it properly — a session
+ * knows its own dates even when its label is illegible. Returns null when
+ * neither the label nor the dates locate it, and the caller drops it: a
+ * session nobody can place tells a reader nothing and pollutes everything
+ * that counts weeks.
+ */
+export function placeSession(
+  session: ClassSession,
+  weeks: CatalogFile['weeks'],
+): ClassSession | null {
+  if (session.week >= 1 && session.week <= 9) return session;
+
+  const day = session.startDate.slice(0, 10);
+  if (!day) return null;
+  for (const [week, [start, end]] of Object.entries(weeks)) {
+    if (day >= start && day <= end) return { ...session, week: Number(week) };
+  }
+  return null;
 }
 
 /** "Weeks 2, 3" / "Week 5" — the catalog prints weeks, not dates. */
@@ -239,7 +267,17 @@ export function mergeCatalog(input: MergeInput): MergeResult {
     Object.entries(catalog.weeks).map(([w, range]) => [Number(w), range[1]]),
   );
 
-  const classes: ChqClass[] = listed.map((c) => {
+  let unplaceable = 0;
+  const classes: ChqClass[] = listed.map((original) => {
+    // Repaired before anything reads `week` — the union below, the card's
+    // rows, the favourite keys and the week picker all key on it.
+    const sessions: ClassSession[] = [];
+    for (const sn of original.sessions) {
+      const placed = placeSession(sn, catalog.weeks);
+      if (placed) sessions.push(placed);
+      else unplaceable++;
+    }
+    const c = { ...original, sessions };
     const cat = byEventAk.get(c.id);
     return {
       ...c,
@@ -274,6 +312,13 @@ export function mergeCatalog(input: MergeInput): MergeResult {
   const priorByCatalogId = new Map<string, ChqClass>();
   for (const c of previous) {
     if (c.catalogId) priorByCatalogId.set(c.catalogId, c);
+  }
+
+  if (unplaceable > 0) {
+    console.warn(
+      `[classes] dropped ${unplaceable} session(s) with no readable week and no ` +
+      'date that falls in one — they would have counted as week 0 everywhere',
+    );
   }
 
   const seen = new Set(classes.map((c) => c.catalogId).filter(Boolean));

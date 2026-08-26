@@ -1,5 +1,5 @@
 import {
-  categoriesFor, mergeCatalog, statusForAbsent, venueOf, type CrawledClass,
+  categoriesFor, mergeCatalog, placeSession, statusForAbsent, venueOf, type CrawledClass,
 } from '../services/classCatalogMerge';
 import type { CatalogClass, CatalogFile } from '../types/catalog';
 
@@ -98,6 +98,47 @@ describe('statusForAbsent — the temporal rule', () => {
 
   it('says nothing about a class the catalog never scheduled', () => {
     expect(statusForAbsent([], ends, CRAWL_DATE)).toBe('unobserved');
+  });
+});
+
+describe('placeSession — a session whose week label could not be read', () => {
+  // parseClassDetail writes week 0 when "Week N" is illegible. That is not a
+  // season week, but it behaves like one everywhere downstream: two of them
+  // on a class collapse to one card row, they share a favourite key, and a
+  // "0" appears in the week picker.
+  const unlabelled = { ...session(0, '2026-08-25 09:00:00', '2026-08-25 10:00:00'), week: 0 };
+
+  it('places it by its own dates', () => {
+    expect(placeSession(unlabelled, WEEKS)!.week).toBe(9);
+  });
+
+  it('leaves a session that already knows its week alone', () => {
+    const known = session(3, '2026-07-13 09:00:00', '2026-07-17 10:00:00');
+    expect(placeSession(known, WEEKS)).toBe(known);
+  });
+
+  it('gives up when the dates fall in no season week', () => {
+    const stray = { ...unlabelled, startDate: '2026-12-25 09:00:00' };
+    expect(placeSession(stray, WEEKS)).toBeNull();
+  });
+
+  it('gives up when there are no dates either', () => {
+    expect(placeSession({ ...unlabelled, startDate: '' }, WEEKS)).toBeNull();
+  });
+
+  it('drops the unplaceable rather than publishing a week 0', () => {
+    const { classes } = mergeCatalog({
+      catalog: catalogFile([catalogClass({ eventAks: [] })]),
+      listed: [crawled({
+        id: 'CHQ.EVN9', title: 'Unreadable', instructor: 'Nobody',
+        sessions: [unlabelled, { ...unlabelled, performanceId: 'PRF2', startDate: '' }],
+      })],
+      crawlDate: CRAWL_DATE,
+    });
+    const c = classes.find((x) => x.id === 'CHQ.EVN9')!;
+    // One placed into week 9, one dropped — and no 0 anywhere.
+    expect(c.sessions.map((sn) => sn.week)).toEqual([9]);
+    expect(c.weeks).toEqual([9]);
   });
 });
 

@@ -222,7 +222,19 @@ type ScheduleRow =
  * back to the schedule the catalog printed.
  */
 export function scheduleRows(chqClass: ChqClass, selectedWeeks: number[] = []): ScheduleRow[] {
-  const bySession = new Map(chqClass.sessions.map((s) => [s.week, s]));
+  // Grouped, not keyed. `new Map(sessions.map(s => [s.week, s]))` keeps only
+  // the last entry for a repeated key, so two sessions in one week showed as
+  // one row and the other vanished with no trace. The merge now places every
+  // session in a real week, which removes the way that happened in practice —
+  // but nothing in the ticket site's model forbids a class meeting twice in
+  // one week, and silently dropping one would be the wrong failure.
+  const bySession = new Map<number, ClassSession[]>();
+  for (const session of chqClass.sessions) {
+    const forWeek = bySession.get(session.week);
+    if (forWeek) forWeek.push(session);
+    else bySession.set(session.week, [session]);
+  }
+
   const scheduled = new Map(chqClass.scheduledWeeks.map((w) => [w.week, w]));
   // Newest first: what is still to come is what someone can act on, and by
   // late August the weeks already gone outnumber it eight to one.
@@ -237,10 +249,10 @@ export function scheduleRows(chqClass: ChqClass, selectedWeeks: number[] = []): 
     ? weeks
     : weeks.filter((w) => selectedWeeks.includes(w) || bySession.has(w));
 
-  return inScope.map((week) => {
-    const session = bySession.get(week);
-    if (session) return { session };
-    return { scheduled: scheduled.get(week)! };
+  return inScope.flatMap((week): ScheduleRow[] => {
+    const sessions = bySession.get(week);
+    if (sessions) return sessions.map((session) => ({ session }));
+    return [{ scheduled: scheduled.get(week)! }];
   });
 }
 

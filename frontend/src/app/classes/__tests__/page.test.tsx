@@ -342,6 +342,27 @@ describe('ClassesPage', () => {
     });
   });
 
+  it('shows both sessions when a class meets twice in one week', async () => {
+    // The rows were keyed on week in a Map, so a repeated week kept only the
+    // last and the other vanished with no trace. The merge now places every
+    // session in a real week, which removes how this happened in practice —
+    // but nothing in the ticket site's model forbids it, and dropping one
+    // silently is the wrong failure.
+    const base = makeClass().sessions[0];
+    useClassData.mockReturnValue(loaded([makeClass({
+      title: 'Twice in week 8', weeks: [8],
+      sessions: [
+        { ...base, performanceId: 'p-mon', week: 8, dateRangeLabel: 'Aug 17', spotsRemaining: 4 },
+        { ...base, performanceId: 'p-thu', week: 8, dateRangeLabel: 'Aug 20', spotsRemaining: 9 },
+      ],
+    })]));
+    render(<ClassesPage />);
+
+    expect(await screen.findByText('4 spots left')).toBeInTheDocument();
+    expect(screen.getByText('9 spots left')).toBeInTheDocument();
+    expect(screen.getAllByText(/Week 8/)).toHaveLength(2);
+  });
+
   it('keeps a starred week out of the fold', async () => {
     // Folding away a week someone has starred would hide their own mark.
     localStorage.setItem('chq-classes-favorites', JSON.stringify({
