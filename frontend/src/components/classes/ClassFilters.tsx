@@ -395,8 +395,6 @@ export function ClassFilters({
         ))}
       </Group>
 
-      {/* Not one of the pickers: this decides what the catalog even contains,
-          so it sits apart from them and survives "clear filters". */}
       </>
       )}
     </section>

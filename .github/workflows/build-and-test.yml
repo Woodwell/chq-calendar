@@ -42,6 +42,15 @@ jobs:
         # workflow had a separate explicit step).
         run: npm run validate --workspace=backend
 
+      - name: Check the compiled class catalog matches its source
+        # config/SpecialStudies.csv is compiled into
+        # backend/src/data/catalog-2026.json by `npm run build:catalog`, and
+        # the Lambda bundles the JSON. Editing the CSV without rebuilding
+        # leaves the two disagreeing with nothing to notice, so this compares
+        # the descriptive half. It reads no crawl, which is what lets it run
+        # here at all — a crawl snapshot is gitignored.
+        run: npm run build:catalog -- --check --workspace=backend
+
       - name: Build backend Lambda handlers (includes tests)
         run: npm run build --workspace=backend
 

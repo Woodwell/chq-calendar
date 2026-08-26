@@ -13,7 +13,6 @@ import {
   getTimeBucket,
   hasActiveFilters,
   sessionMatches,
-  upcomingSessions,
 } from '../classFilterHelpers';
 import type { ChqClass, ClassSession } from '@/lib/classTypes';
 
@@ -187,16 +186,6 @@ describe('filterClasses', () => {
     expect(isSessionOver(ran, '2026-08-22 14:00:00')).toBe(false);
     expect(isSessionOver(ran, '2026-08-22 16:00:00')).toBe(true);
     expect(isSessionOver(ran, '2026-08-21 23:59:59')).toBe(false);
-  });
-
-  it('counts only unfinished sessions as still running', () => {
-    const c = chqClass('mixed', [
-      session({ week: 8, endDate: '2026-08-21 15:00:00' }),
-      session({ week: 9, endDate: '2026-08-28 15:00:00' }),
-    ]);
-    expect(upcomingSessions(c, '2026-08-25 09:00:00').map(s => s.week)).toEqual([9]);
-    // Every session behind us: the class is over, however the site lists it.
-    expect(upcomingSessions(c, '2026-09-01 09:00:00')).toEqual([]);
   });
 
   it('finds a class by a week whose sessions the site has already dropped', () => {

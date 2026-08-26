@@ -168,20 +168,6 @@ export function parseSearchResults(
   return rows;
 }
 
-/**
- * Index of the last results page, read from the pagination control, or null
- * when the fragment has no pagination (a single page of results). Used only
- * as a sanity check on crawl length — the crawl itself stops on the first
- * empty page, so a missing or changed control costs nothing.
- */
-export function parseLastPageIndex(html: string): number | null {
-  const $ = cheerio.load(html);
-  const pages = $('[data-page]')
-    .map((_, el) => Number($(el).attr('data-page')))
-    .get()
-    .filter((n) => Number.isFinite(n));
-  return pages.length ? Math.max(...pages) : null;
-}
 
 /** "Aug 19" -> { month: 8, day: 19 }; null when unrecognized. */
 function parseMonthDay(raw: string): { month: number; day: number } | null {

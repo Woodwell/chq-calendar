@@ -5,39 +5,6 @@ const DEFAULT_BASE_URL = 'https://tickets.chq.org';
 const USER_AGENT = 'chqcal.org class-catalog (https://www.chqcal.org)';
 const REQUEST_TIMEOUT_MS = 15_000;
 
-/**
- * The subject codes the search form offers, with the labels it shows.
- *
- * These go in `eventCategories`, NOT `subjectCategories`. The form does have
- * a `<select name="subjectCategories">`, but choosing from it makes the
- * page's own JavaScript copy the code into the `eventCategories` field:
- * that single field carries whatever you are filtering by, weeks or subjects
- * alike, and the server never reads `subjectCategories` at all. Sending a
- * subject in the field named after it filters nothing, and the result looks
- * exactly like a catalog that has no subjects in it.
- */
-export const CLASS_SUBJECTS: Record<string, string> = {
-  L3_CC_YTH: 'Youth',
-  L3_CC_ARTS: 'Art',
-  L3_CC_BUSF: 'Business & Finance',
-  L3_CC_FOOD: 'Culinary Arts',
-  L3_CC_DNCE: 'Dance',
-  L3_CC_GRSP: 'Games, Recreation & Sports',
-  L3_CC_CRFT: 'Handcrafts & Hobbies',
-  L3_CC_HLTH: 'Health & Fitness',
-  L3_CC_HGP: 'History, Government & Politics',
-  L3_CC_LANG: 'Language',
-  L3_CC_LIT: 'Literature & Writing',
-  L3_CC_MAST: 'Master Classes',
-  L3_CC_MUS: 'Music',
-  L3_CC_PDEV: 'Personal & Professional Development',
-  L3_CC_PHOT: 'Photography',
-  L3_CC_RNPH: 'Religion & Philosophy',
-  L3_CC_SCTC: 'Science & Technology',
-  L3_CC_THEA: 'Theater',
-  L3_CC_GEN: 'General Interest',
-  L3_CC_ONTH: 'On Theme',
-};
 
 /** Every season week. The search rejects an empty week set — see `search`. */
 const ALL_WEEKS = ['WEEK1', 'WEEK2', 'WEEK3', 'WEEK4', 'WEEK5', 'WEEK6', 'WEEK7', 'WEEK8', 'WEEK9'];

@@ -113,7 +113,7 @@ describe('runClassesIngest — full crawl', () => {
     expect(cls.timezone).toBe('America/New_York');
   });
 
-  it('does not republish when nothing changed', async () => {
+  it('rewrites an unchanged catalog so the timestamp says when it was checked', async () => {
     const first = sink();
     await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
@@ -126,9 +126,22 @@ describe('runClassesIngest — full crawl', () => {
       sink: second.api, now: new Date('2026-08-21T15:00:00Z'), year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
-    // generatedAt moved, the catalog did not; a rewrite would churn the CDN.
-    expect(summary.published).toBe(false);
-    expect(second.published).toHaveLength(0);
+    // The catalog did not move, and `changed` says so. It is still written,
+    // because the page reports "spot counts updated N ago" from generatedAt —
+    // and freezing that made a stamp about when the numbers last *moved* read
+    // as one about when they were last *checked*.
+    expect(summary.changed).toBe(false);
+    expect(summary.published).toBe(true);
+    expect(second.published).toHaveLength(1);
+    expect(second.published[0].generatedAt).toBe('2026-08-21T15:00:00.000Z');
+    // The sessions are identical; only `lastObserved` moved, with the date.
+    // That field is excluded from the comparison on purpose — stamping it on
+    // every listed class would make the catalog differ every single day by
+    // construction, and `changed` could never be false.
+    expect(second.published[0].classes.map(c => c.sessions))
+      .toEqual(first.published[0].classes.map(c => c.sessions));
+    expect(second.published[0].classes[0].provenance.lastObserved).toBe('2026-08-21');
+    expect(first.published[0].classes[0].provenance.lastObserved).toBe('2026-08-20');
   });
 
   it('publishes when real enrollment moves', async () => {
@@ -384,7 +397,9 @@ describe('runClassesIngest — spots refresh', () => {
     });
 
     expect(summary.detailsFetched).toBe(0);
-    expect(summary.published).toBe(false);
+    // Nothing was worth re-reading, but the pass ran and confirmed as much.
+    expect(summary.changed).toBe(false);
+    expect(summary.published).toBe(true);
   });
 
   it('does nothing when there is no published catalog to refresh', async () => {

@@ -86,16 +86,15 @@ export default function ClassesPage() {
   // three days on — so the clock decides what is past, not the listing. Time
   // as well as date: at nine in the morning, a class at four has not started.
   const nowLocal = chqNowLocal(new Date());
-  const inScope = classes;
 
   // Drawn from what is in scope, so hiding finished classes also drops the
   // categories only they had.
-  const categories = useMemo(() => availableCategories(inScope), [inScope]);
-  const venues = useMemo(() => availableVenues(inScope), [inScope]);
+  const categories = useMemo(() => availableCategories(classes), [classes]);
+  const venues = useMemo(() => availableVenues(classes), [classes]);
 
   const visible = useMemo(
-    () => (filtering ? filterClasses(inScope, options) : [...inScope]).sort(byLifecycle(nowLocal, options)),
-    [inScope, options, filtering, nowLocal],
+    () => (filtering ? filterClasses(classes, options) : [...classes]).sort(byLifecycle(nowLocal, options)),
+    [classes, options, filtering, nowLocal],
   );
   // The two groups worth a number: what has not begun, and what is under
   // way. "Still running" covered both and so answered neither — a class that

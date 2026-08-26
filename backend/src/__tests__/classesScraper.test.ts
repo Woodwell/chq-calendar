@@ -3,7 +3,6 @@ import * as path from 'path';
 import {
   parseAgeRange,
   parseClassDetail,
-  parseLastPageIndex,
   parseSearchResults,
 } from '../services/classesScraper';
 
@@ -59,16 +58,6 @@ describe('parseSearchResults', () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain('CHQ.EVN1672');
     expect(rows.find(r => r.id === 'CHQ.EVN1672')!.weeksLabel).toBe('Weeks 4 to 5');
-  });
-});
-
-describe('parseLastPageIndex', () => {
-  it('reads the highest page index from the pagination control', () => {
-    expect(parseLastPageIndex(fix('chq-classes-search.html'))).toBe(46);
-  });
-
-  it('returns null when the fragment has no pagination', () => {
-    expect(parseLastPageIndex('<div><table><tbody></tbody></table></div>')).toBeNull();
   });
 });
 

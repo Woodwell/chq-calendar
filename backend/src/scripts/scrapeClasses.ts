@@ -74,7 +74,9 @@ async function main(): Promise<void> {
 
   console.log(`[classes] done in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   if (!summary.published) {
-    console.log('[classes] catalog unchanged — file left as it was');
+    console.log('[classes] nothing to publish — no classes listed for this season yet');
+  } else if (!summary.changed) {
+    console.log('[classes] catalog unchanged; rewritten so the timestamp reflects this check');
   }
 }
 

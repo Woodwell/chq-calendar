@@ -344,10 +344,6 @@ export function scheduledWeekState(
   return scheduled.weekEnd < nowLocal.slice(0, 10) ? 'over' : 'unavailable';
 }
 
-/** Sessions that have not finished yet — what "still running" actually means. */
-export function upcomingSessions(chqClass: ChqClass, nowLocal: string): ClassSession[] {
-  return chqClass.sessions.filter((s) => !isSessionOver(s, nowLocal));
-}
 
 /** Whether the class is scheduled in any of the weeks asked for. */
 export function matchesWeeks(chqClass: ChqClass, selectedWeeks: number[]): boolean {

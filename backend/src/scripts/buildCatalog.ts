@@ -15,7 +15,7 @@
  *   npm run build:catalog
  *   npm run build:catalog -- --year=2026
  *   npm run build:catalog -- --crawl=/path/to/classes-2026.json
- *   npm run build:catalog -- --check     # fail if the output would change
+ *   npm run build:catalog -- --check     # CI: has the CSV drifted from the JSON?
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
@@ -92,7 +92,63 @@ function seasonWeeks(listed: ClassesFile['classes']): Record<string, CatalogWeek
   return weeks;
 }
 
+/**
+ * The fields a rebuild would take from the CSV, for comparing without one.
+ *
+ * Everything else in a catalog row — `eventAks` — comes from the crawl, and
+ * cannot go stale against the CSV because the CSV does not contain it.
+ */
+function describedBy(c: Pick<CatalogClass,
+  'id' | 'title' | 'instructor' | 'description' | 'categories' | 'ageRange'
+  | 'caregiver' | 'fee' | 'materials' | 'location' | 'room' | 'weeks'
+  | 'daysOfWeek' | 'startTime' | 'endTime'>): string {
+  return JSON.stringify([
+    c.id, c.title, c.instructor, c.description, c.categories, c.ageRange,
+    c.caregiver, c.fee, c.materials, c.location, c.room, c.weeks,
+    c.daysOfWeek, c.startTime, c.endTime,
+  ]);
+}
+
+/**
+ * Has the CSV been edited without rebuilding?
+ *
+ * Deliberately reads no crawl. The full build needs one, and a crawl snapshot
+ * is gitignored — so a check that required it could only ever run on the
+ * machine that made it, which is not where drift gets caught. This compares
+ * the descriptive half, which is the only half the CSV can move.
+ */
+function check(): void {
+  const rows = parseCatalog(readFileSync(csvPath, 'utf8'));
+  const existing = JSON.parse(readFileSync(outPath, 'utf8')) as CatalogFile;
+
+  const fresh = new Map(rows.map((r) => [r.id, describedBy(r)]));
+  const built = new Map(existing.classes.map((c) => [c.id, describedBy(c)]));
+
+  const added = [...fresh.keys()].filter((id) => !built.has(id));
+  const removed = [...built.keys()].filter((id) => !fresh.has(id));
+  const changed = [...fresh.entries()]
+    .filter(([id, body]) => built.has(id) && built.get(id) !== body)
+    .map(([id]) => id);
+
+  if (added.length === 0 && removed.length === 0 && changed.length === 0) {
+    console.log(`${relative(outPath)} matches ${relative(csvPath)} (${rows.length} classes)`);
+    return;
+  }
+
+  console.error(`${relative(outPath)} is out of date with ${relative(csvPath)}:`);
+  if (added.length) console.error(`  ${added.length} row(s) only in the CSV: ${added.join(', ')}`);
+  if (removed.length) console.error(`  ${removed.length} row(s) only in the JSON: ${removed.join(', ')}`);
+  if (changed.length) console.error(`  ${changed.length} row(s) differ: ${changed.join(', ')}`);
+  console.error('\nRun: npm run build:catalog');
+  process.exit(1);
+}
+
 function main(): void {
+  if (args.check) {
+    check();
+    return;
+  }
+
   const rows = parseCatalog(readFileSync(csvPath, 'utf8'));
   if (rows.length === 0) throw new Error(`[catalog] ${relative(csvPath)} parsed to zero classes`);
 
@@ -167,19 +223,6 @@ function main(): void {
   console.log('');
   console.log('season weeks:');
   for (let w = 1; w <= 9; w++) console.log(`   week ${w}  ${file.weeks[String(w)].join('  ..  ')}`);
-
-  // `generatedAt` moves every run, so --check compares everything else. It is
-  // the difference between "the catalog changed" and "the clock did".
-  const body = (f: CatalogFile) => JSON.stringify({ ...f, generatedAt: '' }, null, 2);
-  if (args.check) {
-    const existing = JSON.parse(readFileSync(outPath, 'utf8')) as CatalogFile;
-    if (body(existing) !== body(file)) {
-      console.error(`\n[catalog] ${relative(outPath)} is out of date — run npm run build:catalog`);
-      process.exit(1);
-    }
-    console.log(`\n${relative(outPath)} is up to date`);
-    return;
-  }
 
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(file, null, 2)}\n`);

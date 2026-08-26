@@ -52,7 +52,16 @@ export interface ClassesIngestSummary {
   detailsFetched: number;
   detailFailures: number;
   carriedForward: number;
+  /** The file was written. False only when there was nothing to write. */
   published: boolean;
+  /**
+   * Anything but the timestamp differed from the published copy.
+   *
+   * Separate from `published` because a run that confirms the numbers have
+   * not moved is still worth recording — that is what makes the page's
+   * "updated N ago" mean "checked N ago" rather than "last changed N ago".
+   */
+  changed: boolean;
   /** Listings joined to a catalog row. */
   matched: number;
   /** Listed with no catalog row: added after the catalog printed. */
@@ -177,12 +186,24 @@ export async function runClassesIngest(deps: ClassesIngestDeps): Promise<Classes
     : await runSpotsRefresh(deps, previous);
 
   const file: ClassesFile = { generatedAt: now.toISOString(), year, classes: classes.classes };
-  // An empty catalog is never worth writing. Off-season both passes return
-  // nothing, and `catalogChanged` would call that a change worth publishing
-  // when there is no previous file to compare against — creating an empty
-  // classes-<year>.json that reads to the page as "this season has no
-  // classes" rather than "this season has not started".
-  const published = file.classes.length > 0 && catalogChanged(previous, file);
+
+  // `generatedAt` is a freshness stamp, and a stamp only tells the truth if
+  // it is rewritten when the numbers are checked — not only when they move.
+  // Skipping the write on an unchanged catalog froze it, so the page could
+  // say "spot counts updated 3 days ago" about counts confirmed accurate an
+  // hour earlier. Late in a week, and every day off-season, that is the
+  // normal case rather than the edge one.
+  //
+  // So a successful pass publishes. The cost is a 1.4 MB PUT on runs where
+  // nothing moved — around twenty-five a day, against a file the page already
+  // revalidates every 300 seconds — and `changed` still says whether anything
+  // actually did, which is what the log and the summary are for.
+  //
+  // An empty catalog is still never written: off-season both passes return
+  // nothing, and a file saying "this season has no classes" is worse than no
+  // file, because the page cannot fall back past it.
+  const changed = catalogChanged(previous, file);
+  const published = file.classes.length > 0;
   if (published) {
     await sink.publishCatalog(year, file);
   }
@@ -195,6 +216,7 @@ export async function runClassesIngest(deps: ClassesIngestDeps): Promise<Classes
     detailFailures: classes.failures,
     carriedForward: classes.carriedForward,
     published,
+    changed,
     ...classes.merge,
   };
   console.log('[classes-ingest] summary:', JSON.stringify(summary));
