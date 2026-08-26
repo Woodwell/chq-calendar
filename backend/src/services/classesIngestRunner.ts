@@ -177,7 +177,12 @@ export async function runClassesIngest(deps: ClassesIngestDeps): Promise<Classes
     : await runSpotsRefresh(deps, previous);
 
   const file: ClassesFile = { generatedAt: now.toISOString(), year, classes: classes.classes };
-  const published = catalogChanged(previous, file);
+  // An empty catalog is never worth writing. Off-season both passes return
+  // nothing, and `catalogChanged` would call that a change worth publishing
+  // when there is no previous file to compare against — creating an empty
+  // classes-<year>.json that reads to the page as "this season has no
+  // classes" rather than "this season has not started".
+  const published = file.classes.length > 0 && catalogChanged(previous, file);
   if (published) {
     await sink.publishCatalog(year, file);
   }
@@ -217,6 +222,21 @@ const CARRIED_MERGE: MergeCounts = {
 async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
   const { client, year, now, catalog } = deps;
   const rows = await client.fetchCatalog();
+
+  // Nothing listed at all. With a catalog already published for this year
+  // that is an outage and the shrink guard below says so; with none, the
+  // season has not opened and there is nothing to do but wait.
+  if (rows.length === 0) {
+    const priorListed = (previous?.classes ?? []).filter(c => c.provenance.status === 'listed').length;
+    if (priorListed === 0) {
+      console.log(`[classes-ingest] no classes listed for ${year} yet — nothing to publish`);
+      return { classes: previous?.classes ?? [], fetched: 0, failures: 0, carriedForward: 0, merge: CARRIED_MERGE };
+    }
+    throw new Error(
+      `[classes-ingest] the listing returned no classes, but ${priorListed} were published ` +
+      'for this year — refusing to publish an empty catalog over a good one',
+    );
+  }
 
   if (previous && previous.classes.length > 0) {
     // Compare like with like: the published file also holds catalog-only
@@ -287,7 +307,10 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
 async function runSpotsRefresh(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
   const { client, year, now, spotsHorizonDays = DEFAULT_SPOTS_HORIZON_DAYS } = deps;
   if (!previous) {
-    throw new Error('[classes-ingest] spots refresh has no published catalog to refresh — run a full crawl first');
+    // Off-season this is every hour of every day until the next full crawl
+    // finds something. It is a no-op, not a failure.
+    console.log(`[classes-ingest] no published catalog for ${year} to refresh spots in`);
+    return { classes: [], fetched: 0, failures: 0, carriedForward: 0, merge: CARRIED_MERGE };
   }
 
   // Only listed classes have a page to re-read. Catalog-only records carry no

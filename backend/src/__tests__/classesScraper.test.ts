@@ -94,6 +94,28 @@ describe('parseAgeRange', () => {
   });
 });
 
+describe('a session with no seats left', () => {
+  // Derived from the real detail fixture rather than hand-written markup, so
+  // it exercises the same DOM the site actually serves.
+  const withSpots = (n: number) =>
+    fix('chq-class-detail.html').replace(/Spots remaining:13/, `Spots remaining:${n}`);
+
+  it('is full, not open with zero spots', () => {
+    // The site writes "Spots remaining: 0" with no waitlist button. Reported
+    // as `open` it rendered "0 spots left" in urgent red beside a Register
+    // link, and passed the page's Open-by-default filter.
+    const detail = parseClassDetail(withSpots(0), 'CHQ.EVN1687', 2026);
+    expect(detail.sessions[0].availability).toBe('full');
+    expect(detail.sessions[0].spotsRemaining).toBe(0);
+  });
+
+  it('still reads a positive count as open', () => {
+    const detail = parseClassDetail(withSpots(1), 'CHQ.EVN1687', 2026);
+    expect(detail.sessions[0].availability).toBe('open');
+    expect(detail.sessions[0].spotsRemaining).toBe(1);
+  });
+});
+
 describe('parseClassDetail', () => {
   it('extracts each session with its own week, schedule, and spot count', () => {
     const detail = parseClassDetail(fix('chq-class-detail.html'), 'CHQ.EVN1687', 2026);

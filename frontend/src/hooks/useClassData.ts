@@ -5,6 +5,12 @@ interface ClassData {
   classes: ChqClass[];
   /** When the catalog was crawled, for the "updated" note on the page. */
   generatedAt: string | null;
+  /**
+   * The season actually loaded, which is not always the one asked for — see
+   * the fallback below. The page says so when they differ, rather than
+   * presenting last season's classes as this one's.
+   */
+  year: number;
   loading: boolean;
   error: string | null;
 }
@@ -18,7 +24,7 @@ interface ClassData {
  */
 export function useClassData(year: number): ClassData {
   const [state, setState] = useState<ClassData>({
-    classes: [], generatedAt: null, loading: true, error: null,
+    classes: [], generatedAt: null, year, loading: true, error: null,
   });
 
   useEffect(() => {
@@ -27,16 +33,42 @@ export function useClassData(year: number): ClassData {
     // `npm run sync:classes`; in production it is on the CDN.
     const base = import.meta.env.DEV ? '/data' : '/cache/calendar-cache';
 
-    fetch(`${base}/classes-${year}.json`, { headers: { Accept: 'application/json' } })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Could not load classes (${res.status})`);
-        return (await res.json()) as ClassesFile;
-      })
-      .then((file) => {
+    /**
+     * The season asked for, then the one before it.
+     *
+     * The season year turns over on 1 October, months before the ticket site
+     * lists anything for it — so from October until the following summer the
+     * requested file does not exist, and asking only for it left the page
+     * reading "not available" all winter with the complete previous season
+     * sitting on the CDN. Falling back one year shows that season instead,
+     * which is the honest answer to "what were the classes?" out of season.
+     *
+     * One step back only. Two would mean serving a catalog from a season
+     * nobody is asking about.
+     */
+    const load = async (): Promise<{ file: ClassesFile; year: number }> => {
+      const errors: string[] = [];
+      for (const candidate of [year, year - 1]) {
+        try {
+          const res = await fetch(`${base}/classes-${candidate}.json`, {
+            headers: { Accept: 'application/json' },
+          });
+          if (!res.ok) { errors.push(`${candidate}: ${res.status}`); continue; }
+          return { file: (await res.json()) as ClassesFile, year: candidate };
+        } catch (err) {
+          errors.push(`${candidate}: ${err instanceof Error ? err.message : 'failed'}`);
+        }
+      }
+      throw new Error(`Could not load classes (${errors.join(', ')})`);
+    };
+
+    load()
+      .then(({ file, year: loadedYear }) => {
         if (cancelled) return;
         setState({
           classes: file.classes ?? [],
           generatedAt: file.generatedAt ?? null,
+          year: loadedYear,
           loading: false,
           error: null,
         });
@@ -44,7 +76,7 @@ export function useClassData(year: number): ClassData {
       .catch((err: unknown) => {
         if (cancelled) return;
         setState({
-          classes: [], generatedAt: null, loading: false,
+          classes: [], generatedAt: null, year, loading: false,
           error: err instanceof Error ? err.message : 'Could not load classes',
         });
       });

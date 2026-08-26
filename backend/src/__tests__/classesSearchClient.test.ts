@@ -124,10 +124,15 @@ describe('ClassesSearchClient.fetchCatalog', () => {
     expect(calls.filter(c => c.url.includes('searchclasses.html'))).toHaveLength(2);
   });
 
-  it('refuses to publish an empty catalog', async () => {
-    const { fn } = catalogStub(() => EMPTY_FRAGMENT);
-    await expect(new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchCatalog())
-      .rejects.toThrow(/no classes/);
+  it('reports an empty crawl rather than throwing on it', async () => {
+    // Between October and June the site lists nothing, and that is the truth
+    // rather than a fault. Throwing here made the off-season look identical
+    // to an outage and alarmed both schedules hourly for eight months; only
+    // the runner knows whether a catalog was ever published for the year.
+    const { fn } = stubFetch(url =>
+      url.includes('searchclasses.html') ? { body: SEARCH_PAGE } : { body: EMPTY_FRAGMENT });
+    const rows = await new ClassesSearchClient(fn, 'https://tickets.chq.org', 0).fetchCatalog();
+    expect(rows).toEqual([]);
   });
 
   it('treats a page that links classes but parses to none as markup drift', async () => {

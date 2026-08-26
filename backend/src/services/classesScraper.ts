@@ -232,7 +232,13 @@ function parseSessionAvailability(
   }
   const spots = /Spots\s+remaining:\s*(\d+)/i.exec(card.text());
   if (spots) {
-    return { availability: 'open', spotsRemaining: Number(spots[1]) };
+    const remaining = Number(spots[1]);
+    // Zero seats and no waitlist button is the `full` state the type reserves
+    // — the one the plan noted had never been observed. Calling it `open`
+    // read as "0 spots left" in urgent red beside a Register link, and passed
+    // the page's Open-by-default filter: an offer that cannot be taken up.
+    if (remaining === 0) return { availability: 'full', spotsRemaining: 0 };
+    return { availability: 'open', spotsRemaining: remaining };
   }
   return { availability: 'unknown', spotsRemaining: null };
 }

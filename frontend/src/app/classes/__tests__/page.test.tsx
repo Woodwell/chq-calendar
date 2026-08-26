@@ -57,7 +57,7 @@ const makeClass = (over: Partial<ChqClass> = {}): ChqClass => ({
 });
 
 const loaded = (classes: ChqClass[]) => ({
-  classes, generatedAt: new Date().toISOString(), loading: false, error: null,
+  classes, generatedAt: new Date().toISOString(), year: 2026, loading: false, error: null,
 });
 
 /**
@@ -492,6 +492,28 @@ describe('ClassesPage', () => {
       // that session once the week is over.
       expect(stored.eventIds).toEqual(['class:CHQ.EVN1:week8']);
     });
+  });
+
+  it('says so when it is showing last season, rather than passing it off', async () => {
+    // The season year turns over on 1 October, months before the ticket site
+    // lists anything — so the hook falls back a year and the page has to
+    // admit which season the reader is looking at.
+    useClassData.mockReturnValue({
+      classes: [makeClass()], generatedAt: new Date().toISOString(),
+      year: 2025, loading: false, error: null,
+    });
+    render(<ClassesPage />);
+    expect(await screen.findByText(/Special Studies classes for the 2025 season/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/is not published yet, so this is last season/))
+      .toBeInTheDocument();
+  });
+
+  it('says nothing about the season when it is the current one', async () => {
+    useClassData.mockReturnValue(loaded([makeClass()]));
+    render(<ClassesPage />);
+    await screen.findByText(/Special Studies classes for the 2026 season/);
+    expect(screen.queryByText(/so this is last season/)).not.toBeInTheDocument();
   });
 
   it('offers the ticket site when the catalog cannot be loaded', async () => {

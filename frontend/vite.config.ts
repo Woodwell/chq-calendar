@@ -107,6 +107,14 @@ function emitSitemapXml(): PluginOption {
 const APP_VERSION = resolveAppVersion();
 
 /**
+ * A demo build, set by `npm run build:demo` for the bundle only.
+ *
+ * It decides what is *in* the build, not just what the build says about
+ * itself — see the `classes` entry below.
+ */
+const DEMO = process.env.VITE_DEMO === 'true';
+
+/**
  * Serves the class catalog from the build output instead of proxying it.
  *
  * `/cache/*` is proxied to the live site, which is right for events and the
@@ -208,7 +216,14 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         feedback: resolve(__dirname, 'feedback/index.html'),
-        classes: resolve(__dirname, 'classes/index.html'),
+        // /classes is built only into a demo build. Listing it here
+        // unconditionally put it in `out/` for every production deploy, and
+        // `aws s3 sync out/` then published it: unlinked, but live, with a
+        // canonical URL of https://www.chqcal.org/classes and a robots.txt
+        // saying `Allow: /`. The demo flag was gating the menu link and the
+        // banner, never the page itself, so "premature while /classes is
+        // still being reviewed" was true of the link and false of the page.
+        ...(DEMO ? { classes: resolve(__dirname, 'classes/index.html') } : {}),
         privacy: resolve(__dirname, 'privacy/index.html'),
         support: resolve(__dirname, 'support/index.html'),
         about: resolve(__dirname, 'about/index.html'),

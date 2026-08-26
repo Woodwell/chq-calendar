@@ -13,6 +13,9 @@ function availabilityLabel(session: ClassSession): { text: string; className: st
   if (session.availability === 'waitlist') {
     return { text: 'Waitlist', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' };
   }
+  if (session.availability === 'full') {
+    return { text: 'Full', className: 'bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200' };
+  }
   if (session.availability === 'open' && session.spotsRemaining !== null) {
     // A single-digit count is the one worth hurrying for, so it reads louder.
     const urgent = session.spotsRemaining <= 5;
@@ -170,7 +173,10 @@ function SessionRow({ session, classId, registerUrl, isOver, isFavorite, onToggl
         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge.className}`}>
           {badge.text}
         </span>
-        {!isOver && (
+        {/* Nothing to register for on a session that has run, or one that is
+            full with no waitlist to join. A waitlist keeps the link, because
+            joining one is exactly what the link is for. */}
+        {!isOver && session.availability !== 'full' && (
           <a
             href={registerUrl}
             target="_blank"

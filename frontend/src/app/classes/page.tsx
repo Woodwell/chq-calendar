@@ -55,8 +55,10 @@ export function describeAge(generatedAt: string, now: number = Date.now()): stri
 }
 
 export default function ClassesPage() {
-  const year = getDefaultYear();
-  const { classes, generatedAt, loading, error } = useClassData(year);
+  const requestedYear = getDefaultYear();
+  // The season actually loaded. From October the requested year has no
+  // catalog yet, and the hook falls back to the one before it.
+  const { classes, generatedAt, year, loading, error } = useClassData(requestedYear);
   // Its own store, so starring a class does not raise the calendar's badge
   // over things the calendar cannot show.
   const favorites = useFavorites(CLASS_FAVORITES_KEY);
@@ -174,7 +176,11 @@ export default function ClassesPage() {
         )}
 
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Special Studies classes for the {year} season. Spot counts come from{' '}
+          Special Studies classes for the {year} season.{' '}
+          {year !== requestedYear && (
+            <>The {requestedYear} catalog is not published yet, so this is last season.{' '}</>
+          )}
+          Spot counts come from{' '}
           <a
             className="text-blue-600 dark:text-blue-400 hover:underline"
             href={CATALOG_URL}

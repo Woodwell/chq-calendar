@@ -311,6 +311,38 @@ describe('runClassesIngest — the catalog join', () => {
   });
 });
 
+describe('runClassesIngest — the off-season', () => {
+  it('waits quietly when a season has not opened yet', async () => {
+    // October to June the site lists nothing for the coming year. There is no
+    // previous catalog either, so nothing has gone missing — nothing has
+    // started. It must not alarm, and must not write an empty file.
+    const s = sink();
+    const summary = await runClassesIngest({
+      client: source([], {}), sink: s.api, now: NOW, year: 2027, mode: 'full', catalog: catalogFile([]),
+    });
+    expect(summary.published).toBe(false);
+    expect(s.published).toHaveLength(0);
+  });
+
+  it('still refuses to publish an empty catalog over a good one', async () => {
+    // Same empty crawl, but this year already had classes — so something is
+    // wrong with the site or the crawl, and the published file must stand.
+    const previous: ClassesFile = {
+      generatedAt: '2026-08-19T00:00:00.000Z',
+      year: 2026,
+      classes: Array.from({ length: 20 }, (_, i) => ({
+        ...row(`CHQ.EVN${i}`), description: '', sessions: [],
+        timezone: 'America/New_York', ...UNCATALOGUED,
+      })) as ChqClass[],
+    };
+    const s = sink(previous);
+    await expect(runClassesIngest({
+      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
+    })).rejects.toThrow(/refusing to publish an empty catalog over a good one/);
+    expect(s.published).toHaveLength(0);
+  });
+});
+
 describe('runClassesIngest — spots refresh', () => {
   const published = (): ClassesFile => ({
     generatedAt: '2026-08-19T00:00:00.000Z',
@@ -355,11 +387,15 @@ describe('runClassesIngest — spots refresh', () => {
     expect(summary.published).toBe(false);
   });
 
-  it('will not refresh a catalog that was never published', async () => {
+  it('does nothing when there is no published catalog to refresh', async () => {
+    // Off-season this fires every hour until a full crawl finds something.
+    // A no-op, not a failure — throwing alarmed the schedule 24 times a day.
     const s = sink();
-    await expect(runClassesIngest({
+    const summary = await runClassesIngest({
       client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
-    })).rejects.toThrow(/run a full crawl first/);
+    });
+    expect(summary.published).toBe(false);
+    expect(s.published).toHaveLength(0);
   });
 });
 

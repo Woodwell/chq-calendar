@@ -210,9 +210,12 @@ export class ClassesSearchClient {
   /** Every class in the catalog, found by asking for every week. */
   async fetchCatalog(): Promise<ClassSearchRow[]> {
     const byId = await this.crawl(ALL_WEEKS.join(','));
-    if (byId.size === 0) {
-      throw new Error('[classes] catalog crawl found no classes — refusing to publish an empty catalog');
-    }
+    // An empty result is reported, not thrown on. Between October and June it
+    // is simply the truth — the site lists nothing for a season that has not
+    // opened — and throwing made the off-season indistinguishable from an
+    // outage, alarming both schedules every hour for eight months. The runner
+    // decides what emptiness means, because only it knows whether a catalog
+    // for this year was ever published.
     return [...byId.values()];
   }
 
