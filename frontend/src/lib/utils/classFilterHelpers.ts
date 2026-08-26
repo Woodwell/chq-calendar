@@ -122,14 +122,11 @@ export function hasNonWeekSessionFilters(options: ClassFilterOptions): boolean {
 /**
  * The weeks a class is scheduled for.
  *
- * Falls back to the weeks its sessions cover when `weeks` is absent, which
- * happens with a catalog file published before the field existed — those sit
- * in CDN and browser caches for a while after a deploy, and a page that
- * throws on one is worse than a page that offers slightly fewer weeks.
+ * A plain read now: `useClassData` fills the field in for a catalog published
+ * before it existed, so every consumer sees the shape the type promises.
  */
 export function weeksOf(chqClass: ChqClass): number[] {
-  if (Array.isArray(chqClass.weeks)) return chqClass.weeks;
-  return [...new Set((chqClass.sessions ?? []).map((s) => s.week))].sort((a, b) => a - b);
+  return chqClass.weeks;
 }
 
 /**
@@ -254,25 +251,34 @@ export function classLifecycle(
   nowLocal: string,
   options?: ClassFilterOptions,
 ): ClassLifecycle {
+  return lifecycleOf(sessionsInScope(chqClass, options), nowLocal);
+}
+
+/**
+ * Where a set of sessions sits relative to now.
+ *
+ * The shared core, so the counts above the cards and the order of the cards
+ * cannot drift apart — they are the same judgement made from the same list.
+ */
+function lifecycleOf(sessions: ClassSession[], nowLocal: string): ClassLifecycle {
   // Turns on sessions, not on the printed schedule. Ten classes are listed
   // all season with nothing bookable in any week; those are labelled honestly
   // week by week, but they are not something anyone can start, so they do not
   // belong above the classes that are.
-  //
-  // With a filter set this is the sessions that pass it, so a class matched
-  // only by a printed week the crawl cannot see has none in scope and is
-  // finished as far as the question goes.
-  const sessions = sessionsInScope(chqClass, options);
   if (sessions.length === 0) return 'ended';
 
   // Compared as full local datetimes, not day keys. On a date alone a class
   // starting at four in the afternoon reads as under way all morning, and one
   // that finished at half past ten reads as under way until midnight — both
   // of which are wrong at the moment somebody is looking.
-  const starts = sessions.map((sn) => sn.startDate).sort();
-  const ends = sessions.map((sn) => sn.endDate).sort();
-  if (nowLocal < starts[0]) return 'upcoming';
-  if (nowLocal > ends[ends.length - 1]) return 'ended';
+  let firstStart = sessions[0].startDate;
+  let lastEnd = sessions[0].endDate;
+  for (const sn of sessions) {
+    if (sn.startDate < firstStart) firstStart = sn.startDate;
+    if (sn.endDate > lastEnd) lastEnd = sn.endDate;
+  }
+  if (nowLocal < firstStart) return 'upcoming';
+  if (nowLocal > lastEnd) return 'ended';
   return 'running';
 }
 
@@ -285,42 +291,65 @@ const LIFECYCLE_ORDER: Record<ClassLifecycle, number> = { upcoming: 0, running: 
  * what starts soonest, what ends soonest, and — for history — what happened
  * most recently, which is what someone scrolling back is looking for.
  */
-export function byLifecycle(nowLocal: string, options?: ClassFilterOptions) {
-  // Ordered on the same sessions the counts are taken over, so the sentence
-  // above the cards describes the cards below it.
-  const firstStart = (c: ChqClass) =>
-    sessionsInScope(c, options).reduce<string | null>((min, sn) => (min === null || sn.startDate < min ? sn.startDate : min), null);
-  const lastEnd = (c: ChqClass) =>
-    sessionsInScope(c, options).reduce<string | null>((max, sn) => (max === null || sn.endDate > max ? sn.endDate : max), null);
-  const lastWeek = (c: ChqClass) => (c.weeks ?? []).reduce((m, w) => (w > m ? w : m), 0);
+/**
+ * Not started first, then under way, then over.
+ *
+ * Within each group the tie-break is the one that group is asked about: what
+ * starts soonest, what ends soonest, and — for history — what happened most
+ * recently, which is what someone scrolling back is looking for.
+ *
+ * Each class is measured once and sorted on the result, rather than measured
+ * inside the comparator. With ~500 classes a sort makes ~4,500 comparisons,
+ * and every one of those was recomputing both operands' lifecycle and
+ * re-filtering their sessions through `sessionMatches` — twice over, since
+ * the tie-breaks call `sessionsInScope` again. Decorating first turns tens of
+ * thousands of redundant filter passes into one per class.
+ */
+export function sortByLifecycle(
+  classes: ChqClass[],
+  nowLocal: string,
+  options?: ClassFilterOptions,
+): ChqClass[] {
+  const measured = classes.map((c) => {
+    const sessions = sessionsInScope(c, options);
+    let firstStart: string | null = null;
+    let lastEnd: string | null = null;
+    for (const sn of sessions) {
+      if (firstStart === null || sn.startDate < firstStart) firstStart = sn.startDate;
+      if (lastEnd === null || sn.endDate > lastEnd) lastEnd = sn.endDate;
+    }
+    return {
+      chqClass: c,
+      stage: lifecycleOf(sessions, nowLocal),
+      firstStart,
+      lastEnd,
+      lastWeek: c.weeks.reduce((m, w) => (w > m ? w : m), 0),
+    };
+  });
 
-  return (a: ChqClass, b: ChqClass): number => {
-    const la = classLifecycle(a, nowLocal, options);
-    const lb = classLifecycle(b, nowLocal, options);
-    if (la !== lb) return LIFECYCLE_ORDER[la] - LIFECYCLE_ORDER[lb];
+  measured.sort((a, b) => {
+    if (a.stage !== b.stage) return LIFECYCLE_ORDER[a.stage] - LIFECYCLE_ORDER[b.stage];
 
-    if (la === 'upcoming') {
-      const sa = firstStart(a) ?? '';
-      const sb = firstStart(b) ?? '';
+    if (a.stage === 'upcoming') {
+      const sa = a.firstStart ?? '';
+      const sb = b.firstStart ?? '';
       if (sa !== sb) return sa < sb ? -1 : 1;
-    } else if (la === 'running') {
-      const ea = lastEnd(a) ?? '';
-      const eb = lastEnd(b) ?? '';
+    } else if (a.stage === 'running') {
+      const ea = a.lastEnd ?? '';
+      const eb = b.lastEnd ?? '';
       if (ea !== eb) return ea < eb ? -1 : 1;
     } else {
       // Most recent history first. Sessions date it exactly where they exist;
       // otherwise the last week the catalog scheduled is the best we have.
-      const ea = lastEnd(a);
-      const eb = lastEnd(b);
-      if (ea && eb && ea !== eb) return ea < eb ? 1 : -1;
-      if (ea && !eb) return -1;
-      if (!ea && eb) return 1;
-      const wa = lastWeek(a);
-      const wb = lastWeek(b);
-      if (wa !== wb) return wb - wa;
+      if (a.lastEnd && b.lastEnd && a.lastEnd !== b.lastEnd) return a.lastEnd < b.lastEnd ? 1 : -1;
+      if (a.lastEnd && !b.lastEnd) return -1;
+      if (!a.lastEnd && b.lastEnd) return 1;
+      if (a.lastWeek !== b.lastWeek) return b.lastWeek - a.lastWeek;
     }
-    return a.title.localeCompare(b.title);
-  };
+    return a.chqClass.title.localeCompare(b.chqClass.title);
+  });
+
+  return measured.map((m) => m.chqClass);
 }
 
 /**
@@ -389,7 +418,7 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
     if (categories.length > 0 && !c.categories.some((k) => categories.includes(k))) return false;
     // Venue is a property of the class too — a class that moves rooms between
     // weeks still meets in the buildings it meets in.
-    if (venues.length > 0 && !(c.venues ?? []).some((v) => venues.includes(v))) return false;
+    if (venues.length > 0 && !c.venues.some((v) => venues.includes(v))) return false;
     if (!bySession) return true;
 
     // With sessions, the conjunction is resolved per session as before, which
@@ -405,7 +434,7 @@ export function filterClasses(classes: ChqClass[], options: ClassFilterOptions):
     // correctly match nothing rather than being waved through.
     if (hasCrawlOnlyFilters(options)) return false;
 
-    const printed = c.scheduledWeeks ?? [];
+    const printed = c.scheduledWeeks;
     if (printed.length > 0) return printed.some((w) => scheduledMatches(c.id, w, options));
 
     // No printed schedule either: a listing the catalog never covered, or a
@@ -463,11 +492,29 @@ export function availableWeeks(classes: ChqClass[]): number[] {
 export function availableVenues(classes: ChqClass[]): string[] {
   const counts = new Map<string, number>();
   for (const c of classes) {
-    for (const v of c.venues ?? []) counts.set(v, (counts.get(v) ?? 0) + 1);
+    for (const v of c.venues) counts.set(v, (counts.get(v) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
     .map(([name]) => name);
+}
+
+/**
+ * The days a class meets, from every week it runs — live or printed.
+ *
+ * Reading only `sessions` emptied both pickers exactly when the printed
+ * schedule could still answer them: late in the season the ticket site has
+ * dropped all but the last week, and off-season it lists nothing at all, so
+ * the Day and Classes/wk groups vanished from a panel whose filters still
+ * worked. `filterClasses` falls back to `scheduledMatches`, which reads these
+ * same printed days — the options just were not offered. This is the fix
+ * `availableWeeks` already had.
+ */
+function everyMeetingPattern(c: ChqClass): string[][] {
+  return [
+    ...c.sessions.map((s) => s.daysOfWeek),
+    ...c.scheduledWeeks.map((w) => w.daysOfWeek),
+  ];
 }
 
 /** Categories present in the catalog, commonest first, then alphabetical. */
@@ -489,7 +536,7 @@ export function availableCategories(classes: ChqClass[]): string[] {
 export function availableMeetingDays(classes: ChqClass[]): number[] {
   const lengths = new Set<number>();
   for (const c of classes) {
-    for (const s of c.sessions) if (s.daysOfWeek.length > 0) lengths.add(s.daysOfWeek.length);
+    for (const days of everyMeetingPattern(c)) if (days.length > 0) lengths.add(days.length);
   }
   return [...lengths].sort((a, b) => a - b);
 }
@@ -497,6 +544,8 @@ export function availableMeetingDays(classes: ChqClass[]): number[] {
 /** The days that actually have sessions, in week order. */
 export function availableDays(classes: ChqClass[]): string[] {
   const days = new Set<string>();
-  for (const c of classes) for (const s of c.sessions) for (const d of s.daysOfWeek) days.add(d);
+  for (const c of classes) {
+    for (const pattern of everyMeetingPattern(c)) for (const d of pattern) days.add(d);
+  }
   return DAYS_OF_WEEK.filter((d) => days.has(d));
 }

@@ -17,7 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { catalogForSeason } from '../services/seasonCatalog';
 import { mergeCatalog, type CrawledClass } from '../services/classCatalogMerge';
-import { institutionSeasonYear } from '../services/classesIngestRunner';
+import { institutionDateKey, institutionSeasonYear } from '../services/classesIngestRunner';
 import type { ChqClass, ClassesFile } from '../types/classes';
 
 const args = Object.fromEntries(
@@ -43,9 +43,13 @@ const outPath = typeof args.out === 'string' ? resolve(args.out) : inPath;
  */
 function crawlDateOf(file: ClassesFile): string {
   const stamp = file.generatedAt ? new Date(file.generatedAt) : new Date();
-  return Number.isNaN(stamp.getTime())
-    ? new Date().toISOString().slice(0, 10)
-    : stamp.toISOString().slice(0, 10);
+  const at = Number.isNaN(stamp.getTime()) ? new Date() : stamp;
+  // The same reading the Lambda takes. Anything else — UTC, most obviously —
+  // dates an Eastern evening crawl to the following day, and the temporal
+  // rule compares that date against a week's end to decide `cancelled` from
+  // `unobserved`. Merging offline must not reach a different verdict from
+  // merging in the pipeline.
+  return institutionDateKey(at);
 }
 
 /** Strip any previous merge, so re-running is idempotent rather than cumulative. */

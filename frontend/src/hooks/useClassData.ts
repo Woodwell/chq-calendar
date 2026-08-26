@@ -22,6 +22,39 @@ interface ClassData {
  * calendar's event feed, which this page never reads, and classes come from a
  * different file with a different refresh rhythm.
  */
+/**
+ * Fills in fields a published catalog may predate.
+ *
+ * The file is served with `max-age=300` and sits in browser caches beyond
+ * that, so for a while after a deploy the page is reading a shape written by
+ * the previous one — `categories`, `venues`, `scheduledWeeks` and
+ * `provenance` were all added after the first published file. Guarding every
+ * read site meant remembering to, and the ones that were forgotten threw
+ * "Cannot read properties of undefined" and blanked the page: the exact
+ * failure the guards elsewhere existed to prevent.
+ *
+ * Doing it once here means everything downstream can trust the type it was
+ * given, which is what the type was for.
+ */
+function withDefaults(c: Partial<ChqClass>): ChqClass {
+  const sessions = c.sessions ?? [];
+  return {
+    ...c,
+    sessions,
+    categories: c.categories ?? [],
+    venues: c.venues ?? [],
+    scheduledWeeks: c.scheduledWeeks ?? [],
+    weeks: c.weeks ?? [...new Set(sessions.map((s) => s.week))].sort((a, b) => a - b),
+    catalogId: c.catalogId ?? null,
+    materials: c.materials ?? null,
+    fee: c.fee ?? null,
+    room: c.room ?? null,
+    // A file from before provenance existed was, by definition, one the crawl
+    // had just listed.
+    provenance: c.provenance ?? { catalog: false, lastObserved: null, status: 'listed' },
+  } as ChqClass;
+}
+
 export function useClassData(year: number): ClassData {
   const [state, setState] = useState<ClassData>({
     classes: [], generatedAt: null, year, loading: true, error: null,
@@ -66,7 +99,7 @@ export function useClassData(year: number): ClassData {
       .then(({ file, year: loadedYear }) => {
         if (cancelled) return;
         setState({
-          classes: file.classes ?? [],
+          classes: (file.classes ?? []).map(withDefaults),
           generatedAt: file.generatedAt ?? null,
           year: loadedYear,
           loading: false,

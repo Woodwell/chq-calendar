@@ -230,18 +230,11 @@ describe('filterClasses', () => {
     })).toEqual([]);
   });
 
-  it('survives a catalog published before weeks existed', () => {
-    // Old files sit in CDN and browser caches for a while after a deploy.
-    // Falling back to the session weeks costs a little history; throwing
-    // would cost the whole page.
-    const legacy = chqClass('legacy', [session({ week: 9 })]);
-    delete (legacy as Partial<ChqClass>).weeks;
-
-    expect(availableWeeks([legacy])).toEqual([9]);
-    expect(filterClasses([legacy], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [9] }).map(c => c.id))
-      .toEqual(['legacy']);
-    expect(filterClasses([legacy], { ...EMPTY_CLASS_FILTERS, selectedWeeks: [3] })).toEqual([]);
-  });
+  // A legacy catalog missing `weeks` is no longer this module's problem:
+  // useClassData repairs the shape on load, so every consumer here sees the
+  // type it was promised. The repair is tested in
+  // src/__tests__/hooks/useClassData.test.ts — guarding at each read site was
+  // what let one get forgotten and blank the page.
 
   it('offers every scheduled week, not only those with sessions left', () => {
     const finished = chqClass('finished', []);

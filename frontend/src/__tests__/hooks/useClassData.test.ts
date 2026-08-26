@@ -50,6 +50,37 @@ describe('useClassData', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('fills in fields a published catalog predates', async () => {
+    // The file is cached for 300s and lingers in browsers beyond that, so
+    // after a deploy the page reads a shape the previous one wrote. Every
+    // consumer trusts the type it was given, so the shape is repaired here
+    // rather than guarded at each read site — the ones that were forgotten
+    // threw and blanked the page.
+    vi.stubGlobal('fetch', serving({
+      2026: {
+        generatedAt: '2026-08-20T00:00:00.000Z',
+        year: 2026,
+        classes: [{
+          id: 'CHQ.EVN1', title: 'From an older deploy',
+          sessions: [{ week: 8, startDate: '2026-08-17 09:00:00' }],
+        }],
+      },
+    }));
+    const { result } = renderHook(() => useClassData(2026));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const [c] = result.current.classes;
+    expect(c.categories).toEqual([]);
+    expect(c.venues).toEqual([]);
+    expect(c.scheduledWeeks).toEqual([]);
+    expect(c.catalogId).toBeNull();
+    expect(c.materials).toBeNull();
+    // Weeks are recovered from the sessions rather than left undefined.
+    expect(c.weeks).toEqual([8]);
+    // A file from before provenance existed was one the crawl had just listed.
+    expect(c.provenance).toEqual({ catalog: false, lastObserved: null, status: 'listed' });
+  });
+
   it('gives up after one step back rather than trawling the archive', async () => {
     // Two years back would serve a catalog from a season nobody is asking
     // about, which is worse than saying nothing is there.

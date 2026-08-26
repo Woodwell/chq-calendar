@@ -118,8 +118,16 @@ export function institutionSeasonYear(now: Date): number {
   return month >= 10 ? year + 1 : year;
 }
 
-/** Today's date in the Institution's timezone, as YYYY-MM-DD. */
-function institutionDateKey(d: Date): string {
+/**
+ * A date in the Institution's timezone, as YYYY-MM-DD.
+ *
+ * Exported because the offline backfill has to reach the same answer. It used
+ * `toISOString()` — UTC — so a crawl stamped at half past ten on an August
+ * evening was dated the following day there and the current one here, and the
+ * two disagreed about whether a class ending that day was `cancelled` or
+ * `unobserved`.
+ */
+export function institutionDateKey(d: Date): string {
   // en-CA formats as YYYY-MM-DD, which sorts and compares as a string.
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',

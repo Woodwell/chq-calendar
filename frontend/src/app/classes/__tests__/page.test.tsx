@@ -1,6 +1,6 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
 import ClassesPage, { describeAge } from '../page';
-import { EMPTY_CLASS_FILTERS, byLifecycle, classLifecycle } from '@/lib/utils/classFilterHelpers';
+import { EMPTY_CLASS_FILTERS, classLifecycle, sortByLifecycle } from '@/lib/utils/classFilterHelpers';
 import type { ChqClass } from '@/lib/classTypes';
 
 const useClassData = vi.fn();
@@ -121,8 +121,7 @@ describe('byLifecycle', () => {
     const finishedButListed = withSession('c', '2026-08-22 13:00:00', '2026-08-22 15:00:00');
     const noSessionsLeft = makeClass({ id: 'd', title: 'd', sessions: [] });
 
-    expect([finishedButListed, noSessionsLeft, underWay, notStarted]
-      .sort(byLifecycle(NOW_LOCAL)).map(c => c.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(sortByLifecycle([finishedButListed, noSessionsLeft, underWay, notStarted], NOW_LOCAL).map(c => c.id)).toEqual(['a', 'b', 'c', 'd']);
   });
 
   it('reads the time of day, not just the date', () => {
@@ -132,13 +131,13 @@ describe('byLifecycle', () => {
     const thisMorning = withSession('morning', '2026-08-25 09:30:00', '2026-08-25 10:30:00');
 
     // Before either: both to come, soonest first.
-    expect(byLifecycle('2026-08-25 08:00:00')(thisMorning, thisAfternoon)).toBeLessThan(0);
+    expect(sortByLifecycle([thisMorning, thisAfternoon], '2026-08-25 08:00:00').indexOf(thisMorning) - sortByLifecycle([thisMorning, thisAfternoon], '2026-08-25 08:00:00').indexOf(thisAfternoon)).toBeLessThan(0);
     // Late morning: the morning class is over, the afternoon one is not.
-    expect(byLifecycle('2026-08-25 11:00:00')(thisAfternoon, thisMorning)).toBeLessThan(0);
+    expect(sortByLifecycle([thisAfternoon, thisMorning], '2026-08-25 11:00:00').indexOf(thisAfternoon) - sortByLifecycle([thisAfternoon, thisMorning], '2026-08-25 11:00:00').indexOf(thisMorning)).toBeLessThan(0);
     // Mid-afternoon: the afternoon class is under way, still above history.
-    expect(byLifecycle('2026-08-25 17:00:00')(thisAfternoon, thisMorning)).toBeLessThan(0);
+    expect(sortByLifecycle([thisAfternoon, thisMorning], '2026-08-25 17:00:00').indexOf(thisAfternoon) - sortByLifecycle([thisAfternoon, thisMorning], '2026-08-25 17:00:00').indexOf(thisMorning)).toBeLessThan(0);
     // After both: the more recent finish leads the history.
-    expect(byLifecycle('2026-08-25 23:00:00')(thisAfternoon, thisMorning)).toBeLessThan(0);
+    expect(sortByLifecycle([thisAfternoon, thisMorning], '2026-08-25 23:00:00').indexOf(thisAfternoon) - sortByLifecycle([thisAfternoon, thisMorning], '2026-08-25 23:00:00').indexOf(thisMorning)).toBeLessThan(0);
   });
 
   it('judges a class on the sessions in scope, not all of them', () => {
@@ -166,19 +165,19 @@ describe('byLifecycle', () => {
   it('orders what has not started by what starts soonest', () => {
     const later = withSession('later', '2026-08-30 13:00:00', '2026-08-30 15:00:00');
     const sooner = withSession('sooner', '2026-08-26 13:00:00', '2026-08-26 15:00:00');
-    expect([later, sooner].sort(byLifecycle(NOW_LOCAL)).map(c => c.id)).toEqual(['sooner', 'later']);
+    expect(sortByLifecycle([later, sooner], NOW_LOCAL).map(c => c.id)).toEqual(['sooner', 'later']);
   });
 
   it('orders history most recent first', () => {
     const old = withSession('old', '2026-07-01 13:00:00', '2026-07-05 15:00:00');
     const recent = withSession('recent', '2026-08-17 13:00:00', '2026-08-21 15:00:00');
-    expect([old, recent].sort(byLifecycle(NOW_LOCAL)).map(c => c.id)).toEqual(['recent', 'old']);
+    expect(sortByLifecycle([old, recent], NOW_LOCAL).map(c => c.id)).toEqual(['recent', 'old']);
   });
 
   it('dates history by the last week when there are no sessions to date it', () => {
     const week2 = makeClass({ id: 'w2', title: 'w2', sessions: [], weeks: [2] });
     const week7 = makeClass({ id: 'w7', title: 'w7', sessions: [], weeks: [7] });
-    expect([week2, week7].sort(byLifecycle(NOW_LOCAL)).map(c => c.id)).toEqual(['w7', 'w2']);
+    expect(sortByLifecycle([week2, week7], NOW_LOCAL).map(c => c.id)).toEqual(['w7', 'w2']);
   });
 });
 

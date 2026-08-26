@@ -22,7 +22,7 @@ import {
   availableMeetingDays,
   availableCategories,
   availableVenues,
-  byLifecycle,
+  sortByLifecycle,
   classLifecycle,
   availableWeeks,
   filterClasses,
@@ -31,7 +31,7 @@ import {
   scheduledMatches,
   sessionMatches,
 } from '@/lib/utils/classFilterHelpers';
-import { chqNowLocal } from '@/lib/utils/chqTime';
+import { useChqNow } from '@/hooks/useChqNow';
 
 const CATALOG_URL =
   'https://tickets.chq.org/searchclasses.html?subjectParentCat=L2_CC_SUB&weekParentCat=SEAS_WKS';
@@ -76,24 +76,21 @@ export default function ClassesPage() {
   const days = useMemo(() => availableDays(classes), [classes]);
   const meetingDayOptions = useMemo(() => availableMeetingDays(classes), [classes]);
 
-  // Everything the catalog knows about, past weeks included. There is no
-  // separate "hide the finished ones" switch any more: it covered the same
-  // ground as the Spots picker, which says the same thing better — Open and
-  // Waitlist both require a live session, so either one narrows to what can
-  // actually be joined.
-  // The Institution's clock, read once. The ticket site keeps a session
-  // listed for days after it runs — seven were still showing live spot counts
-  // three days on — so the clock decides what is past, not the listing. Time
-  // as well as date: at nine in the morning, a class at four has not started.
-  const nowLocal = chqNowLocal(new Date());
+  // The Institution's clock. The ticket site keeps a session listed for days
+  // after it runs — seven were still showing live spot counts three days on —
+  // so the clock decides what is past, not the listing. Time as well as date:
+  // at nine in the morning, a class at four has not started.
+  //
+  // It ticks once a minute rather than being read during render, so the memos
+  // below are not invalidated by every keystroke that crosses a second, and
+  // so a page left open still catches up when a session ends.
+  const nowLocal = useChqNow();
 
-  // Drawn from what is in scope, so hiding finished classes also drops the
-  // categories only they had.
   const categories = useMemo(() => availableCategories(classes), [classes]);
   const venues = useMemo(() => availableVenues(classes), [classes]);
 
   const visible = useMemo(
-    () => (filtering ? filterClasses(classes, options) : [...classes]).sort(byLifecycle(nowLocal, options)),
+    () => sortByLifecycle(filtering ? filterClasses(classes, options) : classes, nowLocal, options),
     [classes, options, filtering, nowLocal],
   );
   // The two groups worth a number: what has not begun, and what is under

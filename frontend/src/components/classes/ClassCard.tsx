@@ -223,7 +223,7 @@ type ScheduleRow =
  */
 export function scheduleRows(chqClass: ChqClass, selectedWeeks: number[] = []): ScheduleRow[] {
   const bySession = new Map(chqClass.sessions.map((s) => [s.week, s]));
-  const scheduled = new Map((chqClass.scheduledWeeks ?? []).map((w) => [w.week, w]));
+  const scheduled = new Map(chqClass.scheduledWeeks.map((w) => [w.week, w]));
   // Newest first: what is still to come is what someone can act on, and by
   // late August the weeks already gone outnumber it eight to one.
   const weeks = [...new Set([...bySession.keys(), ...scheduled.keys()])].sort((a, b) => b - a);
