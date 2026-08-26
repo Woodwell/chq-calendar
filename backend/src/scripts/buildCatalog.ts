@@ -138,8 +138,7 @@ function main(): void {
     season: year,
     generatedAt: new Date().toISOString(),
     source: {
-      catalog: relative(csvPath),
-      crawl: relative(crawlPath),
+      catalog: 'derived via offline processing of SpecialStudies.csv',
       crawledAt: crawl.generatedAt,
     },
     weeks: seasonWeeks(listed),

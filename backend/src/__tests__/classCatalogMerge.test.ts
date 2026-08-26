@@ -41,7 +41,7 @@ const catalogClass = (over: Partial<CatalogClass> = {}): CatalogClass => ({
 const catalogFile = (classes: CatalogClass[]): CatalogFile => ({
   season: 2026,
   generatedAt: '2026-08-20T00:00:00.000Z',
-  source: { catalog: 'config/SpecialStudies.csv', crawl: 'x.json', crawledAt: '2026-08-20T00:00:00.000Z' },
+  source: { catalog: 'derived via offline processing of SpecialStudies.csv', crawledAt: '2026-08-20T00:00:00.000Z' },
   weeks: WEEKS,
   classes,
   listedOnly: [],

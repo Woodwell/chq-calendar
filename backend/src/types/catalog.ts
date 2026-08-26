@@ -86,11 +86,19 @@ export interface CatalogFile {
   season: number;
   /** When the tool ran. Not a crawl date — this file is not an observation. */
   generatedAt: string;
-  /** What it was built from, so a stale artifact can be recognised as one. */
+  /**
+   * Where this came from, in prose rather than paths.
+   *
+   * The paths were machine-specific and one of them is gitignored, so they
+   * told a later reader nothing. What matters is that a human derived the
+   * descriptive half offline, and when the crawl behind the join was taken.
+   *
+   * `config/SpecialStudies.csv` stays checked in as the reference for the
+   * first of those — it is the provenance, not an input anything reads.
+   */
   source: {
     catalog: string;
-    /** The crawl the join was resolved against, and when it was taken. */
-    crawl: string;
+    /** When the crawl the join was resolved against was taken. */
     crawledAt: string;
   };
   /** Season week number to [start, end]. Keys are stringified numbers. */
