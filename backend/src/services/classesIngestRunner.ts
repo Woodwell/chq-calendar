@@ -1,6 +1,6 @@
 import { parseClassDetail } from './classesScraper';
 import { mergeCatalog, type CrawledClass } from './classCatalogMerge';
-import type { CatalogClass } from './classCatalog';
+import type { CatalogFile } from '../types/catalog';
 import type { ChqClass, ClassSearchRow, ClassesFile } from '../types/classes';
 
 /** Structural deps, so the local script can substitute file-backed stand-ins. */
@@ -33,12 +33,14 @@ export interface ClassesIngestDeps {
   year: number;
   mode: ClassesIngestMode;
   /**
-   * The pre-season catalog. It supplies every descriptive field the site does
-   * not expose, and it is why the subject crawl is gone: categories come from
-   * here, so there is no reason to spend 143 paginated requests learning the
-   * site's own taxonomy.
+   * The season's compiled catalog, bundled with the code — or undefined for a
+   * season nobody has one for, where the crawl publishes on its own.
+   *
+   * It supplies every descriptive field the site does not expose, and it is
+   * why the subject crawl is gone: categories come from here, so there is no
+   * reason to spend 143 paginated requests learning the site's own taxonomy.
    */
-  catalog: CatalogClass[];
+  catalog: CatalogFile | undefined;
   /** How far ahead `spots` mode refreshes. */
   spotsHorizonDays?: number;
 }
@@ -59,8 +61,7 @@ export interface ClassesIngestSummary {
   unobserved: number;
   /** In the catalog, scheduled ahead, and absent from the crawl. Gone. */
   cancelled: number;
-  /** Plausible matches the join declined to make. */
-  needsReview: number;
+
 }
 
 const DEFAULT_SPOTS_HORIZON_DAYS = 10;
@@ -205,12 +206,12 @@ interface Pass {
 
 type MergeCounts = Pick<
   ClassesIngestSummary,
-  'matched' | 'listedOnly' | 'unobserved' | 'cancelled' | 'needsReview'
+  'matched' | 'listedOnly' | 'unobserved' | 'cancelled'
 >;
 
 /** A spots pass re-reads sessions only; the join is whatever the last full crawl decided. */
 const CARRIED_MERGE: MergeCounts = {
-  matched: 0, listedOnly: 0, unobserved: 0, cancelled: 0, needsReview: 0,
+  matched: 0, listedOnly: 0, unobserved: 0, cancelled: 0,
 };
 
 async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | undefined): Promise<Pass> {
@@ -277,7 +278,7 @@ async function runFullCrawl(deps: ClassesIngestDeps, previous: ClassesFile | und
   console.log(
     `[classes-ingest] joined ${summary.matched}/${crawled.length} listings to the catalog; ` +
     `${summary.listedOnly} listed-only, ${summary.unobserved} unobserved, ` +
-    `${summary.cancelled} cancelled, ${summary.needsReview} for review`,
+    `${summary.cancelled} cancelled`,
   );
 
   return { classes, fetched, failures: failures.length, carriedForward, merge: summary };

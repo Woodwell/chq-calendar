@@ -1,6 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { ClassesSearchClient } from '../services/classesSearchClient';
-import { loadCatalog } from '../services/classCatalog';
+import { catalogForSeason } from '../services/seasonCatalog';
 import { ClassesPublisher } from '../services/classesPublisher';
 import {
   institutionSeasonYear,
@@ -40,6 +40,7 @@ export async function scheduledHandler(evt?: ClassesIngestEvent): Promise<Classe
   }
 
   const now = new Date();
+  const year = evt?.year ?? institutionSeasonYear(now);
   return runClassesIngest({
     client: new ClassesSearchClient(),
     sink: new ClassesPublisher(
@@ -48,8 +49,8 @@ export async function scheduledHandler(evt?: ClassesIngestEvent): Promise<Classe
       process.env.CACHE_S3_KEY_PREFIX ?? 'cache/calendar-cache',
     ),
     now,
-    year: evt?.year ?? institutionSeasonYear(now),
+    year,
     mode,
-    catalog: loadCatalog(),
+    catalog: catalogForSeason(year),
   });
 }

@@ -12,11 +12,10 @@
  *   npm run backfill:classes                      # report only, writes nothing
  *   npm run backfill:classes -- --write           # rewrite the file in place
  *   npm run backfill:classes -- --out=/tmp/x.json
- *   npm run backfill:classes -- --review          # list the pairs it declined
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
-import { loadCatalog } from '../services/classCatalog';
+import { catalogForSeason } from '../services/seasonCatalog';
 import { mergeCatalog, type CrawledClass } from '../services/classCatalogMerge';
 import { institutionSeasonYear } from '../services/classesIngestRunner';
 import type { ChqClass, ClassesFile } from '../types/classes';
@@ -59,7 +58,7 @@ function asCrawled(c: ChqClass): CrawledClass {
 }
 
 function main(): void {
-  const catalog = loadCatalog();
+  const catalog = catalogForSeason(year);
   const file = JSON.parse(readFileSync(inPath, 'utf8')) as ClassesFile;
 
   // Only classes the crawl actually returned are input. Catalog-only records
@@ -72,29 +71,18 @@ function main(): void {
   const crawlDate = crawlDateOf(file);
   const { classes, summary } = mergeCatalog({ catalog, listed, previous, crawlDate });
 
-  console.log(`catalog      ${catalog.length} classes from config/SpecialStudies.csv`);
+  console.log(`catalog      ${catalog?.classes.length ?? 0} classes, compiled for season ${year}`);
   console.log(`crawl        ${listed.length} listings, crawled ${crawlDate}`);
   console.log('');
   console.log(`matched      ${summary.matched} listings joined to a catalog row`);
   console.log(`listed only  ${summary.listedOnly} (added after the catalog printed)`);
   console.log(`unobserved   ${summary.unobserved} (finished before the crawl — unknowable)`);
   console.log(`cancelled    ${summary.cancelled} (scheduled ahead, and gone)`);
-  console.log(`for review   ${summary.needsReview} (plausible, not joined)`);
   console.log('');
   console.log(`published    ${classes.length} classes total`);
 
   const withCategories = classes.filter((c) => c.categories.length > 0).length;
   console.log(`             ${withCategories} carry a category, ${classes.length - withCategories} do not`);
-
-  if (args.review) {
-    console.log('\nthe join declined these pairs:');
-    // Re-run the matcher only for its review list; the merge does not expose it.
-    const declined = classes.filter((c) => c.provenance.status !== 'listed' && c.categories.length > 0);
-    for (const c of declined.slice(0, 20)) {
-      console.log(`  ${c.provenance.status.padEnd(11)} ${c.title} — ${c.instructor}`);
-    }
-    if (declined.length > 20) console.log(`  ... and ${declined.length - 20} more`);
-  }
 
   if (args.write || typeof args.out === 'string') {
     const merged: ClassesFile = { ...file, classes };

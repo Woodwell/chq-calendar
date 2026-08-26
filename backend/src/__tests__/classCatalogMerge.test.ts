@@ -1,12 +1,26 @@
 import {
-  fillSeasonWeeks, mergeCatalog, statusForAbsent, weekEndDates, type CrawledClass,
+  categoriesFor, mergeCatalog, statusForAbsent, venueOf, type CrawledClass,
 } from '../services/classCatalogMerge';
-import type { CatalogClass } from '../services/classCatalog';
+import type { CatalogClass, CatalogFile } from '../types/catalog';
 
 const CRAWL_DATE = '2026-08-20';
 
+/** The season calendar as buildCatalog records it, so weeks have dates. */
+const WEEKS: CatalogFile['weeks'] = {
+  '1': ['2026-06-27', '2026-07-03'],
+  '2': ['2026-07-04', '2026-07-10'],
+  '3': ['2026-07-11', '2026-07-17'],
+  '4': ['2026-07-18', '2026-07-24'],
+  '5': ['2026-07-25', '2026-07-31'],
+  '6': ['2026-08-01', '2026-08-07'],
+  '7': ['2026-08-08', '2026-08-14'],
+  '8': ['2026-08-15', '2026-08-21'],
+  '9': ['2026-08-22', '2026-08-28'],
+};
+
 const catalogClass = (over: Partial<CatalogClass> = {}): CatalogClass => ({
   id: '1',
+  eventAks: ['CHQ.EVN1'],
   title: 'Watercolour',
   instructor: 'A Painter',
   description: 'Paint, at length.',
@@ -22,6 +36,16 @@ const catalogClass = (over: Partial<CatalogClass> = {}): CatalogClass => ({
   startTime: '9:00 AM',
   endTime: '10:00 AM',
   ...over,
+});
+
+const catalogFile = (classes: CatalogClass[]): CatalogFile => ({
+  season: 2026,
+  generatedAt: '2026-08-20T00:00:00.000Z',
+  source: { catalog: 'config/SpecialStudies.csv', crawl: 'x.json', crawledAt: '2026-08-20T00:00:00.000Z' },
+  weeks: WEEKS,
+  classes,
+  listedOnly: [],
+  needsReview: [],
 });
 
 const session = (week: number, start: string, end: string) => ({
@@ -49,19 +73,6 @@ const crawled = (over: Partial<CrawledClass> = {}): CrawledClass => ({
   ...over,
 });
 
-describe('weekEndDates', () => {
-  it('learns when each week ends from the sessions the crawl saw', () => {
-    const ends = weekEndDates([
-      crawled({ sessions: [session(8, '2026-08-17 09:00:00', '2026-08-19 10:00:00')] }),
-      crawled({ id: 'CHQ.EVN2', sessions: [session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00')] }),
-      crawled({ id: 'CHQ.EVN3', sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] }),
-    ]);
-    // The latest end wins: a week runs until its last session finishes.
-    expect(ends.get(8)).toBe('2026-08-21');
-    expect(ends.get(9)).toBe('2026-08-28');
-  });
-});
-
 describe('statusForAbsent — the temporal rule', () => {
   const ends = new Map([[1, '2026-06-30'], [8, '2026-08-21'], [9, '2026-08-28']]);
 
@@ -74,13 +85,10 @@ describe('statusForAbsent — the temporal rule', () => {
   });
 
   it('judges on the last week, not the first', () => {
-    // Runs weeks 1 and 9. Week 9 is still ahead, so absence is evidence.
     expect(statusForAbsent([1, 9], ends, CRAWL_DATE)).toBe('cancelled');
   });
 
-  it('will not guess when the crawl could not date the week', () => {
-    // Off-season nothing is listed, so no week has an end date — exactly when
-    // a crawl knows least, and must not start declaring classes cancelled.
+  it('will not guess when the week has no date', () => {
     expect(statusForAbsent([9], new Map(), CRAWL_DATE)).toBe('unobserved');
   });
 
@@ -93,10 +101,41 @@ describe('statusForAbsent — the temporal rule', () => {
   });
 });
 
+describe('venueOf', () => {
+  it('reduces the site\'s room string to a building the catalog names', () => {
+    expect(venueOf('Hultquist Center 201B', ['Hultquist Center'])).toBe('Hultquist Center');
+  });
+
+  it('prefers the longer venue when one name prefixes another', () => {
+    const known = ["Children's School", "Children's School Jessica Trapasso Pavilion"];
+    expect(venueOf("Children's School Jessica Trapasso Pavilion", known))
+      .toBe("Children's School Jessica Trapasso Pavilion");
+  });
+
+  it('keeps a string it cannot reduce rather than dropping the place', () => {
+    expect(venueOf('Somewhere Unlisted', ['Hultquist Center'])).toBe('Somewhere Unlisted');
+  });
+});
+
+describe('categoriesFor', () => {
+  it('names the Masters Series from the title when the catalog cannot', () => {
+    expect(categoriesFor('Masters Series Masterclass: Someone', [])).toEqual(['Masters Series']);
+  });
+
+  it('adds it alongside the catalog categories, not instead of them', () => {
+    expect(categoriesFor('Masters Series Culinary Masterclass', ['Culinary']))
+      .toEqual(['Culinary', 'Masters Series']);
+  });
+
+  it('leaves an ordinary class alone', () => {
+    expect(categoriesFor('Watercolour', ['Art'])).toEqual(['Art']);
+  });
+});
+
 describe('mergeCatalog', () => {
   it('gives each source the fields it is authoritative for', () => {
     const { classes, summary } = mergeCatalog({
-      catalog: [catalogClass()], listed: [crawled()], crawlDate: CRAWL_DATE,
+      catalog: catalogFile([catalogClass()]), listed: [crawled()], crawlDate: CRAWL_DATE,
     });
 
     expect(summary.matched).toBe(1);
@@ -112,9 +151,36 @@ describe('mergeCatalog', () => {
     expect(c.provenance).toEqual({ catalog: true, lastObserved: CRAWL_DATE, status: 'listed' });
   });
 
+  it('joins on the eventAks the build resolved, not on the title', () => {
+    // The titles disagree entirely; the build already decided they are the
+    // same class, and a run has no business second-guessing that.
+    const { classes, summary } = mergeCatalog({
+      catalog: catalogFile([catalogClass({ title: 'Watercolour, Renamed Since Printing' })]),
+      listed: [crawled({ title: 'Something Else Entirely' })],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(summary.matched).toBe(1);
+    expect(classes[0].catalogId).toBe('1');
+    expect(classes[0].categories).toEqual(['Art']);
+  });
+
+  it('lets one catalog row back several of the site\'s per-day listings', () => {
+    const { classes } = mergeCatalog({
+      catalog: catalogFile([catalogClass({ eventAks: ['CHQ.EVN1', 'CHQ.EVN2'] })]),
+      listed: [
+        crawled({ id: 'CHQ.EVN1', title: 'Watercolour: Monday Session' }),
+        crawled({ id: 'CHQ.EVN2', title: 'Watercolour: Tuesday Session' }),
+      ],
+      crawlDate: CRAWL_DATE,
+    });
+    expect(classes.map((c) => c.catalogId)).toEqual(['1', '1']);
+    // One catalog row, two listings, and it is not then also reported absent.
+    expect(classes.filter((c) => c.provenance.status !== 'listed')).toEqual([]);
+  });
+
   it('prefers the catalog ages over the listing text they were parsed from', () => {
     const { classes } = mergeCatalog({
-      catalog: [catalogClass({ ageRange: { min: 6, max: 8 } })],
+      catalog: catalogFile([catalogClass({ ageRange: { min: 6, max: 8 } })]),
       listed: [crawled({ ageRange: { min: 6, max: null } })],
       crawlDate: CRAWL_DATE,
     });
@@ -123,7 +189,7 @@ describe('mergeCatalog', () => {
 
   it('keeps the parsed ages when the catalog has none', () => {
     const { classes } = mergeCatalog({
-      catalog: [catalogClass({ ageRange: { min: null, max: null } })],
+      catalog: catalogFile([catalogClass({ ageRange: { min: null, max: null } })]),
       listed: [crawled({ ageRange: { min: 12, max: null } })],
       crawlDate: CRAWL_DATE,
     });
@@ -132,7 +198,7 @@ describe('mergeCatalog', () => {
 
   it('publishes a listing with no catalog row, and leaves its categories empty', () => {
     const { classes, summary } = mergeCatalog({
-      catalog: [], listed: [crawled()], crawlDate: CRAWL_DATE,
+      catalog: catalogFile([]), listed: [crawled()], crawlDate: CRAWL_DATE,
     });
     expect(summary.listedOnly).toBe(1);
     expect(classes[0].catalogId).toBeNull();
@@ -142,7 +208,10 @@ describe('mergeCatalog', () => {
 
   it('publishes an unobserved class from the catalog alone, with no sessions', () => {
     const { classes, summary } = mergeCatalog({
-      catalog: [catalogClass(), catalogClass({ id: '2', title: 'Long Over', weeks: [1] })],
+      catalog: catalogFile([
+        catalogClass(),
+        catalogClass({ id: '2', eventAks: [], title: 'Long Over', weeks: [1] }),
+      ]),
       listed: [crawled()],
       crawlDate: CRAWL_DATE,
     });
@@ -156,201 +225,53 @@ describe('mergeCatalog', () => {
     expect(gone.sessions).toEqual([]);
     // No listing means no page, so callers must not build a link.
     expect(gone.sourceUrl).toBe('');
-    // It still carries the catalog's description, which is why it is worth publishing.
     expect(gone.description).toBe('Paint, at length.');
     expect(gone.categories).toEqual(['Art']);
   });
 
-  it('names the Masters Series from the title when the catalog cannot', () => {
-    // These are booked after the catalog prints, so 18 of the 31 have no
-    // catalog row. Without this the most recognisable strand on the page
-    // carries no category at all.
-    const { classes } = mergeCatalog({
-      catalog: [],
-      listed: [crawled({ title: 'Masters Series Masterclass: Someone Famous' })],
+  it('calls a catalog class cancelled only when it was scheduled ahead', () => {
+    const { classes, summary } = mergeCatalog({
+      catalog: catalogFile([
+        catalogClass(),
+        catalogClass({ id: '3', eventAks: [], title: 'Pulled', weeks: [9] }),
+      ]),
+      listed: [crawled()],
       crawlDate: CRAWL_DATE,
     });
-    expect(classes[0].categories).toEqual(['Masters Series']);
+    expect(summary.cancelled).toBe(1);
+    expect(classes.find((c) => c.id === 'catalog:3')!.provenance.status).toBe('cancelled');
   });
 
-  it('adds the series alongside the catalog categories, not instead of them', () => {
+  it('dates a printed week from the season calendar the build recorded', () => {
     const { classes } = mergeCatalog({
-      catalog: [catalogClass({ title: 'Masters Series Culinary Masterclass', categories: ['Culinary'] })],
-      listed: [crawled({ title: 'Masters Series Culinary Masterclass' })],
+      catalog: catalogFile([catalogClass({ weeks: [8, 9] })]),
+      listed: [crawled()],
       crawlDate: CRAWL_DATE,
     });
-    expect(classes[0].categories).toEqual(['Culinary', 'Masters Series']);
-  });
-
-  it('reduces the site\'s room string to the catalog\'s building', () => {
-    const { classes } = mergeCatalog({
-      catalog: [catalogClass({ location: 'Hultquist Center', room: '201B' })],
-      listed: [crawled({ sessions: [{ ...session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'), location: 'Hultquist Center 201B' }] })],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].venues).toEqual(['Hultquist Center']);
-  });
-
-  it('falls back to the listing row only when nothing better exists', () => {
-    // No catalog row and no sessions left: the listing's location is all
-    // there is, even though it names a room rather than a building.
-    const { classes } = mergeCatalog({
-      catalog: [],
-      listed: [crawled({ sessions: [], location: 'Norton Hall' })],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].venues).toEqual(['Norton Hall']);
-  });
-
-  it('ignores the listing row once a session says where the class meets', () => {
-    // The listing row carries a room-level string that often will not reduce
-    // to a known building. Consulting it alongside a session would offer the
-    // same place twice under two names.
-    const { classes } = mergeCatalog({
-      catalog: [],
-      listed: [crawled({
-        location: 'Hultquist 101 (room B)',
-        sessions: [{ ...session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'), location: 'Norton Hall' }],
-      })],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].venues).toEqual(['Norton Hall']);
-  });
-
-  it('prefers the longer venue when one name prefixes another', () => {
-    // "Children's School Jessica Trapasso Pavilion" also starts with
-    // "Children's School", and the pavilion is the more useful answer.
-    const catalog = [
-      catalogClass({ id: '1', title: 'A', location: "Children's School" }),
-      catalogClass({ id: '2', title: 'B', location: "Children's School Jessica Trapasso Pavilion" }),
-    ];
-    const { classes } = mergeCatalog({
-      catalog,
-      listed: [crawled({
-        title: 'C', instructor: 'Nobody At All',
-        sessions: [{ ...session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'), location: "Children's School Jessica Trapasso Pavilion" }],
-      })],
-      crawlDate: CRAWL_DATE,
-    });
-    const listedOnly = classes.find((c) => c.title === 'C')!;
-    expect(listedOnly.venues).toEqual(["Children's School Jessica Trapasso Pavilion"]);
+    expect(classes[0].scheduledWeeks.map((w) => [w.week, w.weekStart, w.weekEnd])).toEqual([
+      [8, '2026-08-15', '2026-08-21'],
+      [9, '2026-08-22', '2026-08-28'],
+    ]);
   });
 
   it('keeps the weeks the site has forgotten, so history stays filterable', () => {
-    // The catalog schedules weeks 3 and 9; the site has dropped week 3 now
-    // that it is over and lists only the week 9 session. Both must survive,
-    // or a week already past becomes unreachable.
     const { classes } = mergeCatalog({
-      catalog: [catalogClass({ weeks: [3, 9] })],
+      catalog: catalogFile([catalogClass({ weeks: [3, 9] })]),
       listed: [crawled({ sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] })],
       crawlDate: CRAWL_DATE,
     });
     expect(classes[0].weeks).toEqual([3, 9]);
   });
 
-  it('dates each printed week from the crawl, so past and future can be told apart', () => {
-    const { classes } = mergeCatalog({
-      catalog: [catalogClass({ weeks: [8, 9] })],
-      listed: [crawled({ sessions: [
-        session(8, '2026-08-17 09:00:00', '2026-08-21 10:00:00'),
-        session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00'),
-      ] })],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].scheduledWeeks.map((w) => [w.week, w.weekStart, w.weekEnd])).toEqual([
-      [8, '2026-08-17', '2026-08-21'],
-      [9, '2026-08-24', '2026-08-28'],
-    ]);
-  });
-
-  it('counts the rest of the season off the one week the crawl could date', () => {
-    // By late August the site has dropped every session but week 9's, so a
-    // single week is observed and the other eight would go unlabelled. The
-    // season is nine consecutive weeks, so they follow at seven days each.
-    // Cross-checked against the events feed, which independently puts week 2
-    // at 4 July, week 3 at 11 July and week 9 at 22 August.
-    const filled = fillSeasonWeeks(new Map([[9, { start: '2026-08-22', end: '2026-08-28' }]]));
-    expect(filled.get(8)).toEqual({ start: '2026-08-15', end: '2026-08-21' });
-    expect(filled.get(3)).toEqual({ start: '2026-07-11', end: '2026-07-17' });
-    expect(filled.get(1)).toEqual({ start: '2026-06-27', end: '2026-07-03' });
-    // The observed week is left exactly as observed.
-    expect(filled.get(9)).toEqual({ start: '2026-08-22', end: '2026-08-28' });
-  });
-
-  it('invents no calendar when nothing at all was observed', () => {
-    // Off-season. A season placed from no evidence would be a guess wearing
-    // a date's clothes.
-    expect(fillSeasonWeeks(new Map()).size).toBe(0);
-  });
-
-  it('leaves every week undated when the crawl saw no session at all', () => {
-    // Off-season, and a card must not then claim any week is over.
-    const { classes } = mergeCatalog({
-      catalog: [catalogClass({ weeks: [3] })],
-      listed: [],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].scheduledWeeks[0]).toMatchObject({ weekStart: null, weekEnd: null });
-  });
-
-  it('dates a week by its widest span across every class in it', () => {
-    const { classes } = mergeCatalog({
-      catalog: [catalogClass({ weeks: [9] })],
-      listed: [
-        crawled({ sessions: [session(9, '2026-08-26 09:00:00', '2026-08-26 10:00:00')] }),
-        crawled({ id: 'CHQ.EVN2', title: 'Other', instructor: 'Nobody At All',
-          sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] }),
-      ],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].scheduledWeeks[0]).toMatchObject({
-      weekStart: '2026-08-24', weekEnd: '2026-08-28',
-    });
-  });
-
-  it('falls back to the crawl for a class the catalog never printed', () => {
-    const { classes } = mergeCatalog({
-      catalog: [],
-      listed: [crawled({ sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')] })],
-      crawlDate: CRAWL_DATE,
-    });
-    expect(classes[0].weeks).toEqual([9]);
-  });
-
-  it('renders catalog-only ages and weeks the way the site would have', () => {
-    const { classes } = mergeCatalog({
-      catalog: [catalogClass({
-        id: '2', title: 'Toddler Art', weeks: [2, 3],
-        ageRange: { min: 3, max: 5 }, caregiver: true,
-        daysOfWeek: ['Monday', 'Wednesday'],
-      })],
-      listed: [],
-      crawlDate: CRAWL_DATE,
-    });
-    const c = classes[0];
-    expect(c.ageRangeText).toBe('Ages 3-5 with Caregiver');
-    expect(c.weeks).toEqual([2, 3]);
-    expect(c.weeksLabel).toBe('Weeks 2, 3');
-    expect(c.daysLabel).toBe('M, W');
-  });
-
   it('keeps the date a now-missing class was last seen listed', () => {
-    // Yesterday it was listed under its eventAk; today it is absent and gets
-    // looked up as a catalog row. The date must survive that change of key —
-    // it is precisely when "last seen" starts being worth anything.
     const yesterday = mergeCatalog({
-      catalog: [catalogClass()], listed: [crawled()], crawlDate: '2026-08-19',
+      catalog: catalogFile([catalogClass()]), listed: [crawled()], crawlDate: '2026-08-19',
     }).classes;
     expect(yesterday[0].provenance.lastObserved).toBe('2026-08-19');
 
-    // Another class still running in week 9 is what dates that week, so the
-    // crawl can tell the missing one was scheduled ahead of it.
     const { classes } = mergeCatalog({
-      catalog: [catalogClass({ weeks: [9] })],
-      listed: [crawled({
-        id: 'CHQ.EVN2', title: 'Something Else', instructor: 'Someone Else',
-        sessions: [session(9, '2026-08-24 09:00:00', '2026-08-28 10:00:00')],
-      })],
+      catalog: catalogFile([catalogClass({ eventAks: [], weeks: [9] })]),
+      listed: [],
       previous: yesterday,
       crawlDate: CRAWL_DATE,
     });
@@ -359,35 +280,25 @@ describe('mergeCatalog', () => {
     expect(gone.provenance.lastObserved).toBe('2026-08-19');
   });
 
-  it('carries an earlier observation date forward rather than blanking it', () => {
-    // The class was seen a week ago and is gone now. `lastObserved` is a
-    // record of when it was last actually seen, not of this run's outcome.
-    const previous = mergeCatalog({
-      catalog: [catalogClass({ id: '2', title: 'Long Over', weeks: [1] })],
-      listed: [], crawlDate: '2026-08-13',
-    }).classes;
-    expect(previous[0].provenance.lastObserved).toBeNull();
-
-    const seen = { ...previous[0], provenance: { ...previous[0].provenance, lastObserved: '2026-08-13' } };
-    const { classes } = mergeCatalog({
-      catalog: [catalogClass({ id: '2', title: 'Long Over', weeks: [1] })],
-      listed: [], previous: [seen], crawlDate: CRAWL_DATE,
+  it('publishes the crawl on its own for a season with no catalog', () => {
+    // 2027 will come from somewhere other than a spreadsheet. Until it does,
+    // the pipeline still runs; the classes simply carry no description.
+    const { classes, summary } = mergeCatalog({
+      catalog: undefined, listed: [crawled()], crawlDate: CRAWL_DATE,
     });
-    expect(classes[0].provenance.lastObserved).toBe('2026-08-13');
+    expect(classes).toHaveLength(1);
+    expect(classes[0].catalogId).toBeNull();
+    expect(classes[0].categories).toEqual([]);
+    expect(classes[0].weeks).toEqual([8]);
+    expect(summary).toEqual({ matched: 0, listedOnly: 1, unobserved: 0, cancelled: 0 });
   });
 
-  it('lets one catalog row back several of the site\'s per-day listings', () => {
-    // The site splits an offering into a page per day; the catalog prints it
-    // once. Both listings should pick up the same description.
+  it('still names the Masters Series with no catalog at all', () => {
     const { classes } = mergeCatalog({
-      catalog: [catalogClass({ title: 'Watercolour' })],
-      listed: [
-        crawled({ id: 'CHQ.EVN1', title: 'Watercolour: Monday Session' }),
-        crawled({ id: 'CHQ.EVN2', title: 'Watercolour: Tuesday Session' }),
-      ],
+      catalog: undefined,
+      listed: [crawled({ title: 'Masters Series Masterclass: Someone' })],
       crawlDate: CRAWL_DATE,
     });
-    expect(classes.map((c) => c.catalogId)).toEqual(['1', '1']);
-    expect(classes.every((c) => c.categories.length === 1)).toBe(true);
+    expect(classes[0].categories).toEqual(['Masters Series']);
   });
 });

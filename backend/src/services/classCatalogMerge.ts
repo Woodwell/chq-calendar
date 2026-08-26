@@ -1,6 +1,6 @@
 /**
- * Joins the printed catalog to what the crawl actually found, and decides
- * what each source is allowed to claim.
+ * Joins the compiled catalog to what the crawl found, and decides what each
+ * source is allowed to claim.
  *
  * The split of authority:
  *
@@ -18,13 +18,18 @@
  * the past, so absence means "cancelled" only for a class the catalog
  * scheduled after the crawl ran. For one whose sessions were already over,
  * absence means nothing at all, and is recorded as `unobserved`.
+ *
+ * What this file no longer does is decide *which* catalog row a listing is.
+ * That join is fuzzy, and it is resolved once at build time and checked in
+ * (see types/catalog.ts). Here it is a dictionary lookup, so an ingest run has
+ * no opinions left to get wrong.
  */
-import { reconcileCatalog, type CatalogEntry, type ListedClass } from './classCatalogMatcher';
-import type { CatalogClass } from './classCatalog';
+import type { CatalogClass, CatalogFile } from '../types/catalog';
 import type { ChqClass, ClassStatus, ScheduledWeek } from '../types/classes';
 
 export interface MergeInput {
-  catalog: CatalogClass[];
+  /** The compiled catalog, or undefined for a season with none. */
+  catalog: CatalogFile | undefined;
   /** Freshly crawled classes, carrying only what the site knows. */
   listed: CrawledClass[];
   /** The previously published catalog, for carrying `lastObserved` forward. */
@@ -46,8 +51,6 @@ export interface MergeSummary {
   listedOnly: number;
   unobserved: number;
   cancelled: number;
-  /** Plausible pairs the matcher declined to join. Read these. */
-  needsReview: number;
 }
 
 export interface MergeResult {
@@ -60,29 +63,25 @@ export interface MergeResult {
  * does not.
  *
  * Masters Series masterclasses are booked after the catalog goes to print, so
- * 18 of the 31 have no catalog row and would otherwise carry no category at
- * all — which leaves the most recognisable thing on the page unfilterable.
- * This is not a guessed category: the titles name the programme outright.
+ * most have no catalog row and would otherwise carry no category at all —
+ * which leaves the most recognisable strand on the page unfilterable. Not a
+ * guessed category: the titles name the programme outright.
  */
 const SERIES_CATEGORY = 'Masters Series';
 
-function seriesCategoryOf(title: string): string[] {
-  return /^\s*masters series\b/i.test(title) ? [SERIES_CATEGORY] : [];
-}
-
 /** Categories from the catalog plus the programme the title names, deduped. */
-function categoriesFor(title: string, fromCatalog: string[]): string[] {
-  const series = seriesCategoryOf(title).filter((c) => !fromCatalog.includes(c));
-  return [...fromCatalog, ...series];
+export function categoriesFor(title: string, fromCatalog: string[]): string[] {
+  if (!/^\s*masters series\b/i.test(title)) return fromCatalog;
+  return fromCatalog.includes(SERIES_CATEGORY) ? fromCatalog : [...fromCatalog, SERIES_CATEGORY];
 }
 
 /**
  * The building a class meets in, without the room.
  *
- * The catalog keeps `Location` and `Room` in separate columns; the ticket site
- * runs them together into "Hultquist Center 201B". Matching against the
- * venues the catalog names turns the site's string back into a building, so
- * both sources answer a venue filter with the same words. Longest match wins,
+ * The catalog keeps location and room in separate columns; the ticket site
+ * runs them together into "Hultquist Center 201B". Matching against the venues
+ * the catalog names turns the site's string back into a building, so both
+ * sources answer a venue filter with the same words. Longest match wins,
  * because "Children's School Jessica Trapasso Pavilion" also starts with
  * "Children's School".
  */
@@ -91,100 +90,18 @@ export function venueOf(location: string, knownVenues: string[]): string {
   if (!trimmed) return '';
   let best = '';
   for (const venue of knownVenues) {
-    if (trimmed.length >= venue.length && trimmed.startsWith(venue) && venue.length > best.length) {
-      best = venue;
-    }
+    if (trimmed.startsWith(venue) && venue.length > best.length) best = venue;
   }
   return best || trimmed;
-}
-
-/** Sessions carry "2026-08-26 16:30:00"; the date half is the comparable part. */
-const dateKey = (naiveLocal: string): string => naiveLocal.slice(0, 10);
-
-/** The span of a season week, as the crawl's own sessions reveal it. */
-export interface WeekRange {
-  start: string;
-  end: string;
-}
-
-/**
- * When each season week runs, learned from the sessions the crawl saw.
- *
- * The catalog says a class runs in week 4 but never says what week 4's dates
- * are; the site prints dates but not a season calendar. Reading the mapping
- * off the crawl is what lets the two be compared at all — and it is the only
- * way to tell a printed week already past from one still to come.
- */
-export function weekDateRanges(listed: CrawledClass[]): Map<number, WeekRange> {
-  const ranges = new Map<number, WeekRange>();
-  for (const c of listed) {
-    for (const s of c.sessions) {
-      const start = dateKey(s.startDate);
-      const end = dateKey(s.endDate);
-      const known = ranges.get(s.week);
-      if (!known) {
-        ranges.set(s.week, { start, end });
-        continue;
-      }
-      // Widest span wins: a week runs from its earliest session to its last.
-      if (start < known.start) known.start = start;
-      if (end > known.end) known.end = end;
-    }
-  }
-  return fillSeasonWeeks(ranges);
-}
-
-/** A season week is seven days, so one dated week places all nine. */
-const WEEK_DAYS = 7;
-
-function shiftDate(key: string, days: number): string {
-  const d = new Date(`${key}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * Dates the weeks no session could date, by counting from one that could.
- *
- * By late August the site has dropped every session but week 9's, so the
- * crawl dates one week in nine and the other eight would go unlabelled — a
- * card would say "not listed" about weeks that plainly finished in July.
- *
- * The season is nine consecutive weeks, so a week's dates follow from any
- * other week's by seven days each. This fills only the gaps: a week a session
- * actually dated keeps what was observed. With nothing observed at all —
- * off-season — it fills nothing, which is the right answer rather than a
- * calendar invented from no evidence.
- */
-export function fillSeasonWeeks(ranges: Map<number, WeekRange>): Map<number, WeekRange> {
-  const anchorWeek = [...ranges.keys()].sort((a, b) => a - b)[0];
-  if (anchorWeek === undefined) return ranges;
-
-  const anchor = ranges.get(anchorWeek)!;
-  const filled = new Map(ranges);
-  for (let week = 1; week <= 9; week++) {
-    if (filled.has(week)) continue;
-    const offset = (week - anchorWeek) * WEEK_DAYS;
-    filled.set(week, {
-      start: shiftDate(anchor.start, offset),
-      end: shiftDate(anchor.end, offset),
-    });
-  }
-  return filled;
-}
-
-/** Just the end of each week, which is what the temporal rule turns on. */
-export function weekEndDates(listed: CrawledClass[]): Map<number, string> {
-  return new Map([...weekDateRanges(listed)].map(([week, r]) => [week, r.end]));
 }
 
 /**
  * What a crawl on `crawlDate` may conclude from a catalog class being absent.
  *
- * Returns `cancelled` only when the class was scheduled to run after the
- * crawl — the one case where absence is evidence. Everything else, including
- * a week whose dates the crawl could not establish, is `unobserved`: not a
- * softer way of saying cancelled, but a refusal to guess.
+ * `cancelled` only when the class was scheduled to run after the crawl — the
+ * one case where absence is evidence. Everything else, including a week the
+ * catalog could not date, is `unobserved`: not a softer way of saying
+ * cancelled, but a refusal to guess.
  */
 export function statusForAbsent(
   weeks: number[],
@@ -193,12 +110,8 @@ export function statusForAbsent(
 ): ClassStatus {
   const lastWeek = weeks.length ? Math.max(...weeks) : null;
   if (lastWeek === null) return 'unobserved';
-
   const end = weekEnds.get(lastWeek);
-  // No session anywhere in that week, so the crawl cannot date it. Off-season
-  // every week looks like this, which is exactly when a crawl knows least.
   if (!end) return 'unobserved';
-
   return end > crawlDate ? 'cancelled' : 'unobserved';
 }
 
@@ -214,15 +127,16 @@ const DAY_ABBR: Record<string, string> = {
 };
 
 /**
- * The catalog's schedule, one entry per week it runs.
+ * The catalog's schedule, one entry per week it runs, dated from the season
+ * calendar the build recorded.
  *
- * The catalog prints a single day/time per class rather than one per week, so
- * every week it runs shares the same shape. Kept as a list anyway, because
- * the reader wants to see week 2 and week 3 as separate rows on the card.
+ * The catalog prints one day/time per class rather than one per week, so every
+ * week it runs shares the same shape. Kept as a list because the reader wants
+ * week 2 and week 3 as separate rows on a card.
  */
-function scheduledWeeksOf(c: CatalogClass, ranges: Map<number, WeekRange>): ScheduledWeek[] {
+function scheduledWeeksOf(c: CatalogClass, weeks: CatalogFile['weeks']): ScheduledWeek[] {
   return c.weeks.map((week) => {
-    const range = ranges.get(week);
+    const range = weeks[String(week)];
     return {
       week,
       daysOfWeek: c.daysOfWeek,
@@ -230,11 +144,8 @@ function scheduledWeeksOf(c: CatalogClass, ranges: Map<number, WeekRange>): Sche
       endTime: c.endTime,
       location: c.location,
       room: c.room,
-      // Dated from the crawl's own sessions, so a card can tell a week that
-      // has been and gone from one still ahead. Null when no session
-      // anywhere fell in that week and nothing can date it.
-      weekStart: range?.start ?? null,
-      weekEnd: range?.end ?? null,
+      weekStart: range?.[0] ?? null,
+      weekEnd: range?.[1] ?? null,
     };
   });
 }
@@ -261,7 +172,7 @@ function fromCatalogOnly(
   c: CatalogClass,
   status: ClassStatus,
   lastObserved: string | null,
-  weekRanges: Map<number, WeekRange>,
+  weeks: CatalogFile['weeks'],
 ): ChqClass {
   return {
     // Namespaced so it cannot be mistaken for, or collide with, an eventAk.
@@ -279,9 +190,9 @@ function fromCatalogOnly(
     priceLabel: c.fee,
     location: c.location,
     room: c.room,
-    weeks: c.weeks,
-    scheduledWeeks: scheduledWeeksOf(c, weekRanges),
     venues: c.location ? [c.location] : [],
+    weeks: c.weeks,
+    scheduledWeeks: scheduledWeeksOf(c, weeks),
     weeksLabel: weeksLabel(c.weeks),
     daysLabel: c.daysOfWeek.map((d) => DAY_ABBR[d] ?? d).join(', '),
     sessionCount: c.weeks.length || null,
@@ -294,73 +205,42 @@ function fromCatalogOnly(
   };
 }
 
-/**
- * Every building a class meets in.
- *
- * The catalog's own name first, then each session's location reduced to a
- * building. The listing row is a last resort only: it is the one place 20
- * classes have any location at all — no catalog row, no sessions left — but
- * it carries a room rather than a building, so using it alongside a known
- * venue would list the same place twice under two names.
- */
-export function venuesFor(
-  crawled: CrawledClass,
-  cat: CatalogClass | undefined,
-  knownVenues: string[],
-): string[] {
-  const known = [
-    ...(cat?.location ? [cat.location] : []),
-    ...crawled.sessions.map((sn) => venueOf(sn.location, knownVenues)),
-  ].filter(Boolean);
-  if (known.length > 0) return [...new Set(known)].sort();
-
-  const fallback = crawled.location ? venueOf(crawled.location, knownVenues) : '';
-  return fallback ? [fallback] : [];
-}
-
+/** Everything the crawl found, with the catalog's description attached. */
 export function mergeCatalog(input: MergeInput): MergeResult {
   const { catalog, listed, previous = [], crawlDate } = input;
 
-  const catalogEntries: CatalogEntry[] = catalog.map((c) => ({
-    id: c.id, title: c.title, instructor: c.instructor,
-  }));
-  const listedEntries: ListedClass[] = listed.map((c) => ({
-    id: c.id, title: c.title, instructor: c.instructor,
-  }));
-
-  const rec = reconcileCatalog(catalogEntries, listedEntries);
-
-  // Longest first, so `venueOf` prefers the most specific building.
-  const knownVenues = [...new Set(catalog.map((c) => c.location).filter(Boolean))]
-    .sort((a, b) => b.length - a.length);
-
-  const catalogById = new Map(catalog.map((c) => [c.id, c]));
-  // One catalog row can legitimately back several listings — the site splits
-  // an offering into per-day pages — so this maps listing -> catalog, not the
-  // other way round.
-  const catalogForListing = new Map<string, CatalogClass>();
-  for (const m of rec.matches) {
-    const c = catalogById.get(m.catalogId);
-    if (c) catalogForListing.set(m.listedId, c);
+  // No catalog for this season — off-season, or a year nobody has transcribed.
+  // The crawl still publishes; it simply carries no description.
+  if (!catalog) {
+    return {
+      classes: listed.map((c) => ({
+        ...c,
+        catalogId: null,
+        categories: categoriesFor(c.title, []),
+        materials: null,
+        fee: null,
+        room: null,
+        venues: [...new Set(c.sessions.map((s) => s.location).filter(Boolean))].sort(),
+        weeks: [...new Set(c.sessions.map((s) => s.week))].sort((a, b) => a - b),
+        scheduledWeeks: [],
+        provenance: { catalog: false, lastObserved: crawlDate, status: 'listed' as const },
+      })),
+      summary: { matched: 0, listedOnly: listed.length, unobserved: 0, cancelled: 0 },
+    };
   }
 
-  // Prior records reachable by catalog row, not just by id. A class listed
-  // yesterday was stored under its eventAk; today, absent, it is looked up as
-  // a catalog row — so without this the date it was last seen is lost at
-  // exactly the moment it starts to matter.
-  const priorByCatalogId = new Map<string, ChqClass>();
-  for (const c of previous) {
-    if (c.catalogId) priorByCatalogId.set(c.catalogId, c);
+  // The join, resolved at build time: eventAk -> the catalog row it belongs to.
+  const byEventAk = new Map<string, CatalogClass>();
+  for (const c of catalog.classes) {
+    for (const ak of c.eventAks) byEventAk.set(ak, c);
   }
-
-  // Declared before the mapping below uses it: the season's week calendar is
-  // read off the crawl once, and both the listed and the catalog-only records
-  // date their printed weeks from it.
-  const weekRanges = weekDateRanges(listed);
-  const weekEnds = new Map([...weekRanges].map(([w, r]) => [w, r.end]));
+  const knownVenues = [...new Set(catalog.classes.map((c) => c.location).filter(Boolean))];
+  const weekEnds = new Map(
+    Object.entries(catalog.weeks).map(([w, range]) => [Number(w), range[1]]),
+  );
 
   const classes: ChqClass[] = listed.map((c) => {
-    const cat = catalogForListing.get(c.id);
+    const cat = byEventAk.get(c.id);
     return {
       ...c,
       catalogId: cat?.id ?? null,
@@ -377,39 +257,65 @@ export function mergeCatalog(input: MergeInput): MergeResult {
       // Union rather than either alone. The catalog holds the weeks already
       // past, which the site has dropped; the crawl holds any the catalog did
       // not print, which is all a listing-only class has.
-      weeks: [...new Set([
-        ...(cat?.weeks ?? []),
-        ...c.sessions.map((s) => s.week),
-      ])].sort((a, b) => a - b),
-      // The plan for every week, including those the site has already
-      // dropped. The card falls back to these so a past week still reads as
-      // a week rather than as whatever session happens to be left.
-      scheduledWeeks: cat ? scheduledWeeksOf(cat, weekRanges) : [],
-      // The catalog's own building where it has one, else the site's string
-      // reduced to a building. Sessions can move between weeks, so this is
-      // every venue the class uses rather than one.
+      weeks: [...new Set([...(cat?.weeks ?? []), ...c.sessions.map((s) => s.week)])]
+        .sort((a, b) => a - b),
+      scheduledWeeks: cat ? scheduledWeeksOf(cat, catalog.weeks) : [],
       venues: venuesFor(c, cat, knownVenues),
-      provenance: { catalog: Boolean(cat), lastObserved: crawlDate, status: 'listed' as const },
     };
-  });
+  }).map((c) => ({
+    ...c,
+    provenance: { catalog: c.catalogId !== null, lastObserved: crawlDate, status: 'listed' as const },
+  }));
 
-  const absent = rec.catalogOnly.map((entry) => {
-    const c = catalogById.get(entry.id)!;
-    const status = statusForAbsent(c.weeks, weekEnds, crawlDate);
-    // A class seen by an earlier run keeps that date: it is a record of when
-    // it was last actually observed, not of this run's outcome.
-    const prior = priorByCatalogId.get(c.id);
-    return fromCatalogOnly(c, status, prior?.provenance.lastObserved ?? null, weekRanges);
-  });
+  // Prior records reachable by catalog row, not just by id. A class listed
+  // yesterday was stored under its eventAk; today, absent, it is looked up as
+  // a catalog row — so without this the date it was last seen is lost at
+  // exactly the moment it starts to matter.
+  const priorByCatalogId = new Map<string, ChqClass>();
+  for (const c of previous) {
+    if (c.catalogId) priorByCatalogId.set(c.catalogId, c);
+  }
+
+  const seen = new Set(classes.map((c) => c.catalogId).filter(Boolean));
+  const absent = catalog.classes
+    .filter((c) => !seen.has(c.id))
+    .map((c) => {
+      const status = statusForAbsent(c.weeks, weekEnds, crawlDate);
+      const prior = priorByCatalogId.get(c.id);
+      return fromCatalogOnly(c, status, prior?.provenance.lastObserved ?? null, catalog.weeks);
+    });
 
   return {
     classes: [...classes, ...absent],
     summary: {
-      matched: rec.matches.length,
-      listedOnly: rec.listedOnly.length,
+      matched: classes.filter((c) => c.catalogId !== null).length,
+      listedOnly: classes.filter((c) => c.catalogId === null).length,
       unobserved: absent.filter((c) => c.provenance.status === 'unobserved').length,
       cancelled: absent.filter((c) => c.provenance.status === 'cancelled').length,
-      needsReview: rec.needsReview.length,
     },
   };
+}
+
+/**
+ * Every building a class meets in.
+ *
+ * The catalog's own name first, then each session's location reduced to a
+ * building. The listing row is a last resort only: it is the one place some
+ * classes have any location at all — no catalog row, no sessions left — but it
+ * carries a room rather than a building, so using it alongside a known venue
+ * would list the same place twice under two names.
+ */
+export function venuesFor(
+  crawled: CrawledClass,
+  cat: CatalogClass | undefined,
+  knownVenues: string[],
+): string[] {
+  const known = [
+    ...(cat?.location ? [cat.location] : []),
+    ...crawled.sessions.map((sn) => venueOf(sn.location, knownVenues)),
+  ].filter(Boolean);
+  if (known.length > 0) return [...new Set(known)].sort();
+
+  const fallback = crawled.location ? venueOf(crawled.location, knownVenues) : '';
+  return fallback ? [fallback] : [];
 }

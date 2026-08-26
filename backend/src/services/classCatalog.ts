@@ -1,5 +1,10 @@
 /**
- * The pre-season Special Studies catalog, read from config/SpecialStudies.csv.
+ * Parses config/SpecialStudies.csv into records, for the build step only.
+ *
+ * Nothing at runtime reads this: `npm run build:catalog` compiles the CSV
+ * into src/data/catalog-<year>.json, and the pipeline reads that. Keeping the
+ * parser out of the Lambda is what removed the filesystem from the ingest
+ * path entirely.
  *
  * That file is a transcription of the PDF Chautauqua publishes before the
  * season, and it carries what the ticket site never exposes: ages as numbers,
@@ -11,8 +16,6 @@
  * whether a class ran. See classCatalogMatcher for the join and
  * classesIngestRunner for how the two sources are given authority.
  */
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import { parseCsvRecords } from '../utils/parseCsv';
 import type { ClassAgeRange } from '../types/classes';
 
@@ -158,39 +161,4 @@ export function parseCatalog(csvText: string): CatalogClass[] {
   }
 
   return [...byOffering.values()];
-}
-
-/**
- * Where the catalog CSV lives.
- *
- * Checked into the repo rather than fetched: it is derived by hand from the
- * season's PDF once a year, so there is nothing to fetch it from. The env var
- * exists because the Lambda bundle lays the file out differently from a
- * checkout, and a deploy that forgets to ship it should fail loudly on the
- * path rather than quietly publish a catalog with no descriptions.
- */
-export function catalogPath(): string {
-  const override = process.env.CLASSES_CATALOG_PATH;
-  if (override) return override;
-  // From src/services (checkout) or dist/services (bundle), the repo root is
-  // three levels up in both layouts.
-  return resolve(__dirname, '../../../config/SpecialStudies.csv');
-}
-
-/** Read and parse the catalog, or fail with the path that was tried. */
-export function loadCatalog(path: string = catalogPath()): CatalogClass[] {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch {
-    throw new Error(
-      `[classes] no Special Studies catalog at ${path} — set CLASSES_CATALOG_PATH, ` +
-      'or check that config/SpecialStudies.csv shipped with this build',
-    );
-  }
-  const catalog = parseCatalog(text);
-  if (catalog.length === 0) {
-    throw new Error(`[classes] catalog at ${path} parsed to zero classes`);
-  }
-  return catalog;
 }

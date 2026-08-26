@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { runClassesIngest, type ClassesSink, type ClassesSource } from '../services/classesIngestRunner';
-import type { CatalogClass } from '../services/classCatalog';
+import type { CatalogClass, CatalogFile } from '../types/catalog';
 import type { ChqClass, ClassSearchRow, ClassesFile } from '../types/classes';
 
 const fix = (n: string) => fs.readFileSync(path.join(__dirname, 'fixtures', n), 'utf8');
@@ -45,9 +45,10 @@ function source(
   };
 }
 
-/** A catalog class matching `row()`'s title and instructor, so the join lands. */
+/** A compiled catalog class, joined to a listing by eventAk rather than title. */
 const catalogEntry = (over: Partial<CatalogClass> = {}): CatalogClass => ({
   id: '1',
+  eventAks: ['CHQ.EVN1687'],
   title: 'If Chocolate Brings You Joy: Wednesday Session',
   instructor: 'Jill Sandler',
   description: 'Chocolate, at length.',
@@ -63,6 +64,22 @@ const catalogEntry = (over: Partial<CatalogClass> = {}): CatalogClass => ({
   startTime: '4:30 PM',
   endTime: '5:45 PM',
   ...over,
+});
+
+const catalogFile = (classes: CatalogClass[]): CatalogFile => ({
+  season: 2026,
+  generatedAt: '2026-08-20T00:00:00.000Z',
+  source: { catalog: 'config/SpecialStudies.csv', crawl: 'x.json', crawledAt: '2026-08-20T00:00:00.000Z' },
+  weeks: {
+    '1': ['2026-06-27', '2026-07-03'], '2': ['2026-07-04', '2026-07-10'],
+    '3': ['2026-07-11', '2026-07-17'], '4': ['2026-07-18', '2026-07-24'],
+    '5': ['2026-07-25', '2026-07-31'], '6': ['2026-08-01', '2026-08-07'],
+    '7': ['2026-08-08', '2026-08-14'], '8': ['2026-08-15', '2026-08-21'],
+    '9': ['2026-08-22', '2026-08-28'],
+  },
+  classes,
+  listedOnly: [],
+  needsReview: [],
 });
 
 /** The catalog-supplied fields on a class the catalog does not cover. */
@@ -85,7 +102,7 @@ describe('runClassesIngest — full crawl', () => {
     const s = sink();
     const summary = await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
-      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
     expect(summary).toMatchObject({ classes: 1, sessions: 2, detailsFetched: 1, published: true });
@@ -100,13 +117,13 @@ describe('runClassesIngest — full crawl', () => {
     const first = sink();
     await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
-      sink: first.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: first.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
     const second = sink(first.published[0]);
     const summary = await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
-      sink: second.api, now: new Date('2026-08-21T15:00:00Z'), year: 2026, mode: 'full', catalog: [],
+      sink: second.api, now: new Date('2026-08-21T15:00:00Z'), year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
     // generatedAt moved, the catalog did not; a rewrite would churn the CDN.
@@ -118,13 +135,13 @@ describe('runClassesIngest — full crawl', () => {
     const first = sink();
     await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
-      sink: first.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: first.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
     const second = sink(first.published[0]);
     const summary = await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_2 }),
-      sink: second.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: second.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
     expect(summary.published).toBe(true);
@@ -138,7 +155,7 @@ describe('runClassesIngest — full crawl', () => {
     const first = sink();
     await runClassesIngest({
       client: source(ids.map(row), {}),  // every id serves the day-1 page
-      sink: first.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: first.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
     expect(first.published[0].classes).toHaveLength(10);
 
@@ -147,7 +164,7 @@ describe('runClassesIngest — full crawl', () => {
     const day2 = Object.fromEntries(ids.map(id => [id, DAY_2]));
     const summary = await runClassesIngest({
       client: source(ids.map(row), day2, ['CHQ.EVN3']),
-      sink: second.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: second.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
 
     expect(summary).toMatchObject({ detailsFetched: 9, detailFailures: 1, carriedForward: 1 });
@@ -173,7 +190,7 @@ describe('runClassesIngest — full crawl', () => {
 
     await expect(runClassesIngest({
       client: source(Array.from({ length: 50 }, (_, i) => row(`CHQ.EVN${i}`)), {}),
-      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     })).rejects.toThrow(/listing fell from 100 to 50/);
     expect(s.published).toHaveLength(0);
   });
@@ -183,7 +200,7 @@ describe('runClassesIngest — full crawl', () => {
     const s = sink();
     await expect(runClassesIngest({
       client: source(ids.map(row), {}, ids.slice(0, 5)),
-      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     })).rejects.toThrow(/5 of 10 detail pages failed/);
     expect(s.published).toHaveLength(0);
   });
@@ -194,7 +211,7 @@ describe('runClassesIngest — the catalog join', () => {
     const s = sink();
     const summary = await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
-      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: [catalogEntry()],
+      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([catalogEntry()]),
     });
 
     const cls = s.published[0].classes[0];
@@ -214,7 +231,7 @@ describe('runClassesIngest — the catalog join', () => {
     const summary = await runClassesIngest({
       client: source([row('CHQ.EVN9999')], { 'CHQ.EVN9999': DAY_1 }),
       sink: s.api, now: NOW, year: 2026, mode: 'full',
-      catalog: [catalogEntry({ title: 'Something Else Entirely', instructor: 'Nobody' })],
+      catalog: catalogFile([catalogEntry({ eventAks: ['CHQ.EVN0000'], title: 'Something Else Entirely' })]),
     });
 
     const cls = s.published[0].classes.find(c => c.id === 'CHQ.EVN9999')!;
@@ -232,7 +249,10 @@ describe('runClassesIngest — the catalog join', () => {
     const summary = await runClassesIngest({
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
       sink: s.api, now: NOW, year: 2026, mode: 'full',
-      catalog: [catalogEntry(), catalogEntry({ id: '2', title: 'Long Since Over', weeks: [1] })],
+      catalog: catalogFile([
+        catalogEntry(),
+        catalogEntry({ id: '2', eventAks: [], title: 'Long Since Over', weeks: [1] }),
+      ]),
     });
 
     const gone = s.published[0].classes.find(c => c.id === 'catalog:2')!;
@@ -251,7 +271,10 @@ describe('runClassesIngest — the catalog join', () => {
       client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
       sink: s.api, now: NOW, year: 2026, mode: 'full',
       // Week 9 ends Aug 26, after the Aug 20 crawl — so absence is evidence.
-      catalog: [catalogEntry(), catalogEntry({ id: '3', title: 'Pulled From The Schedule', weeks: [9] })],
+      catalog: catalogFile([
+        catalogEntry(),
+        catalogEntry({ id: '3', eventAks: [], title: 'Pulled From The Schedule', weeks: [9] }),
+      ]),
     });
 
     const gone = s.published[0].classes.find(c => c.id === 'catalog:3')!;
@@ -282,7 +305,7 @@ describe('runClassesIngest — the catalog join', () => {
 
     const summary = await runClassesIngest({
       client: source(Array.from({ length: 10 }, (_, i) => row(`CHQ.EVN${i}`)), {}),
-      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: [],
+      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
     expect(summary.classes).toBe(10);
   });
@@ -312,7 +335,7 @@ describe('runClassesIngest — spots refresh', () => {
     const s = sink(published());
     const summary = await runClassesIngest({
       client: source([], { 'CHQ.EVN1687': DAY_2 }),
-      sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: [],
+      sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
     });
 
     expect(summary.detailsFetched).toBe(1);
@@ -325,7 +348,7 @@ describe('runClassesIngest — spots refresh', () => {
     const s = sink(far);
 
     const summary = await runClassesIngest({
-      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: [],
+      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
     });
 
     expect(summary.detailsFetched).toBe(0);
@@ -335,7 +358,7 @@ describe('runClassesIngest — spots refresh', () => {
   it('will not refresh a catalog that was never published', async () => {
     const s = sink();
     await expect(runClassesIngest({
-      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: [],
+      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
     })).rejects.toThrow(/run a full crawl first/);
   });
 });
@@ -360,7 +383,7 @@ describe('the spots horizon', () => {
     const s = sink(withSession('2026-08-17 13:00:00', '2026-08-21 15:00:00'));
     const summary = await runClassesIngest({
       client: source([], { 'CHQ.EVN1687': DAY_2 }),
-      sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: [],
+      sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
     });
     expect(summary.detailsFetched).toBe(1);
   });
@@ -368,7 +391,7 @@ describe('the spots horizon', () => {
   it('leaves a session that has already finished', async () => {
     const s = sink(withSession('2026-08-10 13:00:00', '2026-08-14 15:00:00'));
     const summary = await runClassesIngest({
-      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: [],
+      client: source([], {}), sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
     });
     expect(summary.detailsFetched).toBe(0);
   });

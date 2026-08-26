@@ -33,7 +33,7 @@ describe('classes ingest handler', () => {
     run.mockResolvedValue({
       mode: 'full', classes: 0, sessions: 0,
       detailsFetched: 0, detailFailures: 0, carriedForward: 0,
-      matched: 0, listedOnly: 0, unobserved: 0, cancelled: 0, needsReview: 0, published: false,
+      matched: 0, listedOnly: 0, unobserved: 0, cancelled: 0, published: false,
     });
   });
 
