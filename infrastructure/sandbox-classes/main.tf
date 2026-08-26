@@ -128,16 +128,24 @@ resource "aws_lambda_function" "classes_ingest" {
   timeout     = 900
   memory_size = 512
 
-  # One at a time. Two schedules drive this function — a daily full crawl of
-  # 258s and an hourly spots pass — and each reads the catalog, works, then
-  # rewrites the whole file. Overlapping, the shorter pass finishes last and
-  # publishes its stale copy over the longer one's work.
+  # Unreserved here, reserved in production — see ../classes-ingest.tf, which
+  # caps this at 1 so the daily full crawl and the hourly spots pass cannot
+  # overlap and publish a stale copy over each other's work.
   #
-  # The publisher's conditional write already refuses that, but refusing means
-  # losing the run. This stops the overlap happening at all; the precondition
-  # stays as the check that proves it, since a cap is a claim about the
-  # platform and the ETag is a fact about the object.
-  reserved_concurrent_executions = 1
+  # A new AWS account gets 10 concurrent executions and AWS will not let the
+  # unreserved pool fall below 10, so reserving even 1 is rejected outright:
+  #   InvalidParameterValueException: Specified ReservedConcurrentExecutions
+  #   for function decreases account's UnreservedConcurrentExecution below its
+  #   minimum value of [10]
+  # Raising the quota is a support request, which is a lot of process to buy
+  # a property this account does not need: both schedules below are DISABLED,
+  # so the only way to run two of these at once is to invoke it twice by hand.
+  #
+  # Correctness does not rest on the cap in any case. The publisher's
+  # conditional write is what makes an overlapping run impossible to lose data
+  # to — it refuses the second write on a stale ETag. The cap only spares us
+  # the refusal, and a sandbox can afford to lose a run.
+  reserved_concurrent_executions = -1
 
   environment {
     variables = {
