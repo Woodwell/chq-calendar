@@ -128,6 +128,17 @@ resource "aws_lambda_function" "classes_ingest" {
   timeout     = 900
   memory_size = 512
 
+  # One at a time. Two schedules drive this function — a daily full crawl of
+  # 258s and an hourly spots pass — and each reads the catalog, works, then
+  # rewrites the whole file. Overlapping, the shorter pass finishes last and
+  # publishes its stale copy over the longer one's work.
+  #
+  # The publisher's conditional write already refuses that, but refusing means
+  # losing the run. This stops the overlap happening at all; the precondition
+  # stays as the check that proves it, since a cap is a claim about the
+  # platform and the ETag is a fact about the object.
+  reserved_concurrent_executions = 1
+
   environment {
     variables = {
       CACHE_S3_BUCKET     = aws_s3_bucket.catalog.bucket

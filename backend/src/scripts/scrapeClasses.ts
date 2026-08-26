@@ -23,6 +23,7 @@ import {
   runClassesIngest,
   type ClassesIngestMode,
   type ClassesSink,
+  type LoadedCatalog,
 } from '../services/classesIngestRunner';
 import type { ClassesFile } from '../types/classes';
 
@@ -38,9 +39,10 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
 /** The same sink the Lambda uses, backed by a file instead of S3. */
 function fileSink(out: string): ClassesSink {
   return {
-    async loadCatalog(): Promise<ClassesFile | undefined> {
+    async loadCatalog(): Promise<LoadedCatalog | undefined> {
       try {
-        return JSON.parse(readFileSync(out, 'utf8')) as ClassesFile;
+        // No version: one process writing one file has nothing to race.
+        return { file: JSON.parse(readFileSync(out, 'utf8')) as ClassesFile };
       } catch {
         return undefined;
       }

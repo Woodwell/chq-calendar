@@ -88,13 +88,47 @@ const UNCATALOGUED = {
   provenance: { catalog: false, lastObserved: '2026-08-20', status: 'listed' as const },
 };
 
+/**
+ * A sink that behaves like S3: it hands out a version on read and refuses a
+ * write whose expected version is not the current one.
+ */
 function sink(initial?: ClassesFile) {
   const published: ClassesFile[] = [];
+  const expectations: (string | undefined)[] = [];
+  let current = initial;
+  let version = initial ? 'v1' : undefined;
+
+  let pending: ClassesFile | undefined;
+
   const api: ClassesSink = {
-    loadCatalog: async () => initial,
-    publishCatalog: async (_year, file) => { published.push(file); },
+    loadCatalog: async () => {
+      const snapshot = current ? { file: current, version } : undefined;
+      // An armed clobber lands after this read and before the write — which
+      // is the only window the race actually occupies.
+      if (pending) {
+        current = pending;
+        version = 'other';
+        pending = undefined;
+      }
+      return snapshot;
+    },
+    publishCatalog: async (_year, file, expected) => {
+      expectations.push(expected);
+      if (expected !== version) {
+        throw new Error('[classes] catalog changed while this run was working');
+      }
+      current = file;
+      version = `v${published.length + 2}`;
+      published.push(file);
+    },
   };
-  return { api, published };
+  return {
+    api,
+    published,
+    expectations,
+    /** Arm another run to publish between this one's read and its write. */
+    clobber(file: ClassesFile) { pending = file; },
+  };
 }
 
 describe('runClassesIngest — full crawl', () => {
@@ -321,6 +355,58 @@ describe('runClassesIngest — the catalog join', () => {
       sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
     });
     expect(summary.classes).toBe(10);
+  });
+});
+
+describe('runClassesIngest — two schedules, one file', () => {
+  /** A catalog on the bucket with one class running inside the spots horizon. */
+  const onBucket = (): ClassesFile => ({
+    generatedAt: '2026-08-19T00:00:00.000Z',
+    year: 2026,
+    classes: [{
+      ...row('CHQ.EVN1687'), description: '', timezone: 'America/New_York', ...UNCATALOGUED,
+      sessions: [{
+        performanceId: 'CHQ.EVN1687.PRF2', week: 9, dateRangeLabel: 'Aug 26 - Aug 26',
+        startDate: '2026-08-26 16:30:00', endDate: '2026-08-26 17:45:00',
+        daysOfWeek: ['Wednesday'], timeRangeLabel: '4:30 pm - 5:45 pm',
+        location: 'Turner Community Center Conference Room',
+        spotsRemaining: 28, availability: 'open',
+      }],
+    }] as ChqClass[],
+  });
+
+  it('writes conditionally on the copy it read', async () => {
+    const s = sink();
+    await runClassesIngest({
+      client: source([row('CHQ.EVN1687')], { 'CHQ.EVN1687': DAY_1 }),
+      sink: s.api, now: NOW, year: 2026, mode: 'full', catalog: catalogFile([]),
+    });
+    // No catalog existed, so the write must assert that it still does not —
+    // otherwise two runs creating a season's first file both think they won.
+    expect(s.expectations).toEqual([undefined]);
+  });
+
+  it('passes back the version it was given', async () => {
+    const s = sink(onBucket());
+    await runClassesIngest({
+      client: source([], { 'CHQ.EVN1687': DAY_2 }),
+      sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
+    });
+    expect(s.expectations).toEqual(['v1']);
+  });
+
+  it('fails rather than overwriting a run that published first', async () => {
+    // The daily full crawl takes 258s; the hourly spots pass can begin inside
+    // that window, read the pre-crawl copy, and finish first. Writing then
+    // would silently discard the crawl's new and cancelled classes.
+    const s = sink(onBucket());
+    s.clobber({ ...onBucket(), generatedAt: '2026-08-20T09:04:18.000Z' });
+
+    await expect(runClassesIngest({
+      client: source([], { 'CHQ.EVN1687': DAY_2 }),
+      sink: s.api, now: NOW, year: 2026, mode: 'spots', catalog: catalogFile([]),
+    })).rejects.toThrow(/changed while this run was working/);
+    expect(s.published).toHaveLength(0);
   });
 });
 

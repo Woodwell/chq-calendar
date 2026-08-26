@@ -13,6 +13,18 @@ export interface ClassesSource {
   ): Promise<{ fetched: number; failures: { id: string; error: string }[] }>;
 }
 
+/**
+ * A catalog as it was read, with the token needed to write back over it.
+ *
+ * `version` is opaque here — S3's ETag in production, and unused by the file
+ * sink the local script uses. It travels through the run so the write can be
+ * made conditional on nothing else having published in between.
+ */
+export interface LoadedCatalog {
+  file: ClassesFile;
+  version?: string;
+}
+
 export interface ClassesSink {
   /**
    * The previously published catalog. It doubles as this pipeline's state:
@@ -20,8 +32,12 @@ export interface ClassesSink {
    * catalog is entirely public data — so a separate state object would only
    * be a second copy to keep in step.
    */
-  loadCatalog(year: number): Promise<ClassesFile | undefined>;
-  publishCatalog(year: number, file: ClassesFile): Promise<void>;
+  loadCatalog(year: number): Promise<LoadedCatalog | undefined>;
+  /**
+   * `expected` is the version that was read, or undefined when there was no
+   * catalog — in which case the write must fail if one has since appeared.
+   */
+  publishCatalog(year: number, file: ClassesFile, expected?: string): Promise<void>;
 }
 
 export type ClassesIngestMode = 'full' | 'spots';
@@ -179,7 +195,8 @@ function catalogChanged(before: ClassesFile | undefined, after: ClassesFile): bo
  */
 export async function runClassesIngest(deps: ClassesIngestDeps): Promise<ClassesIngestSummary> {
   const { sink, now, year, mode } = deps;
-  const previous = await sink.loadCatalog(year);
+  const loaded = await sink.loadCatalog(year);
+  const previous = loaded?.file;
 
   const classes = mode === 'full'
     ? await runFullCrawl(deps, previous)
@@ -205,7 +222,10 @@ export async function runClassesIngest(deps: ClassesIngestDeps): Promise<Classes
   const changed = catalogChanged(previous, file);
   const published = file.classes.length > 0;
   if (published) {
-    await sink.publishCatalog(year, file);
+    // Conditional on the copy this run read. Two schedules share this
+    // function and each rewrites the whole file, so an overlapping pass would
+    // otherwise publish its stale copy over the other's finished work.
+    await sink.publishCatalog(year, file, loaded?.version);
   }
 
   const summary: ClassesIngestSummary = {
