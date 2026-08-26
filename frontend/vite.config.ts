@@ -1,6 +1,6 @@
 import { defineConfig, PluginOption } from 'vite';
 import preact from '@preact/preset-vite';
-import { resolve } from 'path';
+import { basename, resolve } from 'path';
 import { existsSync, createReadStream } from 'fs';
 import { execSync } from 'child_process';
 import { buildSitemapXml, PUBLIC_PATHS } from './src/lib/sitemap';
@@ -149,14 +149,24 @@ function previewMiddleware(): PluginOption {
           next();
           return;
         }
-        const file = resolve(out, path.replace(/^\//, ''));
+        // Two places, in the order of how much they resemble a real deploy.
+        // The staged copy under the CDN path is what a host actually serves,
+        // so it wins when present; `out/data/` is where Vite lands the
+        // checked-in `public/data/` copy on every build.
+        //
+        // The fallback is the point. Requiring the staged copy meant a manual
+        // `cp` after each `build:demo` — which wipes `out/` — and forgetting
+        // it left the page reporting a 404 that looked like a broken crawl.
+        const staged = resolve(out, path.replace(/^\//, ''));
+        const shipped = resolve(out, 'data', basename(path));
+        const file = existsSync(staged) ? staged : shipped;
         if (!existsSync(file)) {
-          // Say which file is missing rather than letting it fall through to
+          // Say which files were tried rather than letting it fall through to
           // the proxy, which answers with an S3 error that explains nothing.
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
-            error: `No catalog at ${file}. Stage it with: ` +
-              'mkdir -p out/cache/calendar-cache && cp public/data/classes-2026.json out/cache/calendar-cache/',
+            error: `No catalog at ${staged} or ${shipped}. ` +
+              'Run `npm run build:demo` to copy public/data/ into out/.',
           }));
           return;
         }
