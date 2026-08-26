@@ -32,6 +32,20 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Cap the worker pool on a developer machine, and only there.
+    //
+    // Vitest runs roughly one worker per core. On a sixteen-core box that is
+    // fifteen jsdom workers each carrying v8 coverage instrumentation, and the
+    // contention is enough to push a test with several sequential `waitFor`s
+    // past its five-second budget — offSeasonLanding's "preview next season"
+    // case fails that way under --coverage while passing on its own, and
+    // passes again at four workers. The tests are not at fault; the machine is
+    // oversubscribed.
+    //
+    // CI is left on the default deliberately: hosted runners have two to four
+    // cores, so the pool is already small there, and halving it again would
+    // only make the build slower for no gain.
+    maxWorkers: process.env.CI ? undefined : '50%',
     // Pin the test-run timezone to the app's own zone (Chautauqua
     // Institution, America/New_York). Without this, DST-transition tests
     // (see dayWindow.test.ts) only discriminate a DST-safe date-parts
