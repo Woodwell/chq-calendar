@@ -49,7 +49,9 @@ jobs:
         # leaves the two disagreeing with nothing to notice, so this compares
         # the descriptive half. It reads no crawl, which is what lets it run
         # here at all — a crawl snapshot is gitignored.
-        run: npm run build:catalog -- --check --workspace=backend
+        # --workspace before the --, or npm treats it as a script argument and
+        # looks for build:catalog in the repo root, where it does not exist.
+        run: npm run build:catalog --workspace=backend -- --check
 
       - name: Build backend Lambda handlers (includes tests)
         run: npm run build --workspace=backend
