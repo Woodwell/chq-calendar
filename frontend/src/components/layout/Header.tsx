@@ -5,6 +5,8 @@ import { quickLinks, inAppLinks, externalLinks, type QuickLink } from '@/lib/qui
 import { APP_STORE_URL } from '@/lib/constants';
 import { isAppPromoAvailable, readDeviceInfo } from '@/lib/iosPromo';
 import { isDemoBuild } from '@/lib/demoMode';
+import { useSiteHeaderReveal } from '@/hooks/useSiteHeaderReveal';
+import { siteHeaderTop } from '@/app/filterHeaderLayout';
 
 interface HeaderProps {
   selectedYear: number;
@@ -57,14 +59,49 @@ export function Header({ selectedYear, availableYears, defaultYear, onYearChange
   const promo = appAvailable ? [APP_PROMO_ITEM] : [];
   const demo = isDemoBuild ? [DEMO_CLASSES_ITEM] : [];
 
+  // Reveal on scroll up, hide on scroll down (#272). The header is the only
+  // route to the "more" menu and the year selector, and below the fold it
+  // used to be unreachable without scrolling the whole document back to the
+  // top — from a rail tap, tens of thousands of pixels.
+  const { revealed, headerRef } = useSiteHeaderReveal();
+
   return (
-    <header className="bg-white dark:bg-gray-800 shadow-lg">
-      {/* A strip rather than a pill beside the title. At 375px "CHQ Calendar"
-          fits in exactly the width it has — a badge in that row truncated it
-          to "CHQ C…", which looks broken and undermines the thing it is
-          announcing. Full width costs the title nothing and is harder to
-          miss. */}
-      {isDemoBuild && (
+      
+    /*
+      Sticky with a negative `top`, never fixed: the header stays in flow, so
+      document height never changes and the scroll-anchoring loop documented
+      in `filterHeaderLayout.ts` has nothing to correct. `z-40` puts it above
+      the filter/rail container's `z-30`, which rides down by this header's
+      measured height while it is revealed.
+
+      `inert` while parked is not cosmetic. The header is still in the DOM and
+      still in flow, so a keyboard reader would tab into it and the browser
+      would chase a focused control it cannot scroll into view — the same trap
+      `filterCardParked` exists for.
+    */
+    <header
+      ref={headerRef}
+      data-site-header
+      inert={!revealed || undefined}
+      aria-hidden={!revealed || undefined}
+      style={{ top: siteHeaderTop() }}
+      // The shadow goes with the header. A shadow paints OUTSIDE the border
+      // box, so parked — box entirely above the viewport — `shadow-lg`
+      // (`0 10px 15px -3px`) still reached ~15px below it, and at `z-40` that
+      // landed on the `z-30` rail. Measured by screenshotting the top 24px
+      // with the header parked, with and without it: the images differ. A
+      // hidden header was painting a grey band across the rail it yields to.
+      // `overflow-hidden` while parked, for the same reason the shadow goes:
+      // an open dropdown is positioned OUTSIDE the header's border box, so
+      // parking the box left the menu behind. Measured in Chromium after
+      // opening the "more" menu and scrolling down — header at `bottom: 0` and
+      // `inert`, its menu still occupying -4 → 258, a panel over most of the
+      // screen at `z-40` that nothing could click. The menu stays OPEN: it
+      // belongs to the header, and scrolling back up should find it where the
+      // reader left it.
+      className={`sticky z-40 bg-white dark:bg-gray-800 ${revealed ? 'shadow-lg' : 'overflow-hidden'}`}
+    >
+    {isDemoBuild && (
         <div
           data-testid="demo-badge"
           className="bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-center text-xs px-4 py-1"

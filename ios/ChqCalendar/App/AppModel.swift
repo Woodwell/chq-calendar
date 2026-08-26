@@ -256,10 +256,25 @@ final class AppModel {
     /// "ask once" actually deterministic.
     private var hasRequestedReminderAuthorizationThisLaunch = false
 
+    /// The dataset year this launch is nailed to, or `nil` — every real
+    /// launch — for the normal "whatever the years manifest calls default"
+    /// behavior.
+    ///
+    /// Non-nil only under `-uitest-pin-year` in a DEBUG build (see
+    /// `launchPinnedYear()`), which is what keeps an App Store screenshot
+    /// capture on the 2026 season after the manifest has moved on to a
+    /// later one. Freezing the clock with `-uitest-freeze-now` is not
+    /// enough on its own: `start()` takes the year from the *manifest*, not
+    /// from `now`, so a capture run in March 2027 with only the clock
+    /// pinned would render 2027 events under a summer-2026 clock — worse
+    /// than pinning nothing (#222).
+    private let pinnedYear: Int?
+
     init(
         repository: EventRepository,
         store: UserStateStore,
         now: @escaping @Sendable () -> Date = { Date() },
+        pinnedYear: Int? = nil,
         reminderCenter: ReminderCenter? = nil,
         widgetReloader: WidgetReloading? = nil,
         spotlightIndexer: SpotlightIndexing? = nil
@@ -274,17 +289,44 @@ final class AppModel {
         self.favorites = store.loadFavorites()
         self.recents = store.loadRecents()
         self.reminderSettings = store.loadReminderSettings()
-        self.selectedYear = Self.placeholderYear
-        self.defaultYear = Self.placeholderYear
+        self.pinnedYear = pinnedYear
+        // A pin is in force from construction, not from `start()`: the
+        // launching UI reads `selectedYear` before any manifest has been
+        // fetched, and a pinned run must never briefly render the
+        // placeholder year's state.
+        self.selectedYear = pinnedYear ?? Self.placeholderYear
+        self.defaultYear = pinnedYear ?? Self.placeholderYear
     }
 
     // MARK: - Derived
 
-    /// The events currently shown, filtered then grouped by NY calendar day.
-    /// Recomputed on every access rather than cached — at ~1.6k events this
-    /// is cheap enough that memoization isn't worth the extra state.
+    /// The events currently shown, filtered then grouped by NY calendar
+    /// day, stamped with the window they were filtered by — one value per
+    /// render pass, so a view that binds it once can never pair a day list
+    /// from one pass with a window from another (#254). Recomputed on every
+    /// access rather than cached — at ~1.6k events this is cheap enough
+    /// that memoization isn't worth the extra state.
+    ///
+    /// The stamp is `currentWindow` — the same value the rail's model-side
+    /// callers read — and the filter pass here uses that exact window via
+    /// `EventFilter`'s window-taking entry point, so the stamp *is* the
+    /// filtering window rather than a second computation that could drift.
+    /// `currentWindow` reads `navigableBounds`, which is cached in
+    /// `navMatching`, so this costs no per-render O(n) bounds scan.
+    var renderedDays: RenderedDays {
+        guard let snapshot else { return RenderedDays(days: [], window: nil) }
+        let window = currentWindow
+        let events = EventFilter.apply(
+            filter, to: snapshot.events, favorites: favorites,
+            year: selectedYear, window: window)
+        return RenderedDays(
+            days: EventGrouping.byDay(events, year: selectedYear), window: window)
+    }
+
+    /// `renderedDays` without the stamp, for callers that only need the
+    /// days. Costs the same full filter+group pass — bind it once.
     var dayGroups: [DayGroup] {
-        EventGrouping.byDay(filteredEvents(filter), year: selectedYear)
+        renderedDays.days
     }
 
     /// How many events the current selection matches — the same number as
@@ -520,10 +562,22 @@ final class AppModel {
 
         let manifest = await repository.availableYears()
         years = manifest.years
-        defaultYear = manifest.defaultYear
+        // A pinned launch (`-uitest-pin-year`, DEBUG only) overrides the
+        // manifest outright, including its `defaultYear` — the pinned year
+        // has to read as *the current season* (`isCurrentYear`), or the
+        // shots pick up the archived-season chrome and the downgraded date
+        // scope that go with viewing a past year. It is also force-listed
+        // among the selectable years, so the year picker cannot end up
+        // disagreeing with what is actually on screen if the manifest has
+        // already dropped the pinned season.
+        let effectiveDefault = pinnedYear ?? manifest.defaultYear
+        if let pinnedYear, !years.contains(pinnedYear) {
+            years = (years + [pinnedYear]).sorted()
+        }
+        defaultYear = effectiveDefault
 
-        if selectedYear != manifest.defaultYear {
-            selectedYear = manifest.defaultYear
+        if selectedYear != effectiveDefault {
+            selectedYear = effectiveDefault
             if let cached = await repository.cachedSnapshot(year: selectedYear) {
                 snapshot = cached
                 phase = .ready
@@ -1020,6 +1074,10 @@ final class AppModel {
     /// also calls `select(year:)` is the future path if pre-season archive
     /// browsing is wanted; not implemented here (follow-up).
     func browseArchiveSeason() {
+        // No `scopeResetCount` bump needed: only reachable from
+        // `OffSeasonLandingView`, which renders solely under
+        // `filter.isDefault` — so this always changes `dateScope`
+        // (`.next` → `.season`), a `PendingDayScroll.Key` field (#254).
         filter = FilterSelection(dateScope: .season)
     }
 
@@ -1040,6 +1098,9 @@ final class AppModel {
     func previewNextSeason() async {
         guard case .postSeason(_, let nextSeasonYear?, _, _) = landingState else { return }
         await select(year: nextSeasonYear)
+        // No `scopeResetCount` bump needed: same `OffSeasonLandingView`-only
+        // reachability as `browseArchiveSeason()`, and `select(year:)` above
+        // changes `Key.year` on every path this runs (#254).
         filter = FilterSelection(dateScope: .all)
     }
 
@@ -1047,19 +1108,57 @@ final class AppModel {
     /// the week strip are two ways of expressing one date range, never two
     /// ranges to intersect.
     ///
-    /// Re-tapping the active scope is a no-op. The web toggles back to
-    /// "all" here, but it has no All button; iOS does, so the scope row
-    /// behaves as a radio group instead.
+    /// Re-tapping the active scope *resets* it: any scope-local date state
+    /// — a window widened by "Show next day", a window grown by day-rail
+    /// navigation, a browsed day — is cleared, leaving exactly what a fresh
+    /// selection of that scope would give. Only a re-tap with nothing left
+    /// to clear is a no-op. The web toggles back to "all" here, but it has
+    /// no All button; iOS does, so the scope row behaves as a radio group
+    /// instead.
+    ///
+    /// The rail is the *likeliest* source of that state since #258, not an
+    /// afterthought: `goToDay` writes `windowStartDayKey` and
+    /// `windowEndDayKey`, and every rail chip tap reaches it through
+    /// `EventListView.selectDay` — including the rail's own `⟳ Now`. So the
+    /// common path into this reset is navigate the rail → open Filters →
+    /// re-tap the active chip, and the accumulated expansion collapses.
+    /// `expandWindowEnd` ("Show next day") is only the other writer.
+    ///
+    /// The guard therefore tests "nothing would change", not "same scope"
+    /// (#234). Its purpose is unchanged — not writing `filter`, and so not
+    /// firing its `didSet` or a `persistFilter`, when genuinely nothing
+    /// changes — but the old one-liner made the early return the single path
+    /// into this method that skipped `clearScopeLocalDateState()`, so
+    /// "Show next day" ×2 → Now kept the widened window.
+    ///
+    /// This is the *only* "put me back" gesture in the app, which is why it
+    /// has to actually reset. The rail's `⟳ Now` is not a second one: #258
+    /// deleted `AppModel.resetToNow()` precisely so that control could be
+    /// pure navigation — the spec has it "not touch scope, weeks,
+    /// categories, or search," and
+    /// `AppModelTests.nowLeavesAnyAccumulatedExpansionInPlace` pins that it
+    /// leaves a widened window alone. The two controls share a name, not a
+    /// job (#258 finding 2).
     ///
     /// Also drops the two pieces of state that only mean something under a
     /// scope the user is leaving, via `clearScopeLocalDateState()` — see
     /// that method for why both belong to the scope rather than to the
     /// selection as a whole (#156, #197).
     func selectScope(_ scope: DateScope) {
-        guard filter.dateScope != scope || !filter.selectedWeeks.isEmpty else { return }
-        filter.dateScope = scope
-        filter.selectedWeeks = []
-        clearScopeLocalDateState()
+        let unchanged = filter.dateScope == scope
+            && filter.selectedWeeks.isEmpty
+            && filter.windowStartDayKey == nil
+            && filter.windowEndDayKey == nil
+            && filter.selectedDayKey == nil
+        guard !unchanged else { return }
+        // Copy-modify-assign, like `goToDay`: `filter`'s `didSet` runs a
+        // full `rebuildDerivedCounts()` per changed assignment, so the
+        // action batches its writes into one (#267 review finding).
+        var next = filter
+        next.dateScope = scope
+        next.selectedWeeks = []
+        clearScopeLocalDateState(in: &next)
+        filter = next
         persistFilter()
     }
 
@@ -1081,13 +1180,32 @@ final class AppModel {
     ///   `DateFilterLabel` would have to describe (#197 item 5).
     ///
     /// `browseDay` deliberately does *not* call this: it is the one writer
-    /// that sets `selectedDayKey` and clears the window fields in the same
-    /// assignment, in that order.
-    private func clearScopeLocalDateState() {
-        filter.selectedDayKey = nil
-        filter.windowStartDayKey = nil
-        filter.windowEndDayKey = nil
+    /// that *sets* `selectedDayKey` while clearing the window fields, in
+    /// its own single batched assignment.
+    ///
+    /// Operates on the caller's pending copy rather than on `filter`
+    /// directly, so the caller's whole action lands in one assignment and
+    /// `filter`'s `didSet` rebuilds derived data once, not once per field
+    /// (#267 review finding). Still bumps the reset epoch itself — the
+    /// bump belongs to the reset, wherever it is applied from.
+    private func clearScopeLocalDateState(in next: inout FilterSelection) {
+        scopeResetCount += 1
+        next.selectedDayKey = nil
+        next.windowStartDayKey = nil
+        next.windowEndDayKey = nil
     }
+
+    /// Monotonic count of scope-local date resets — every
+    /// `clearScopeLocalDateState()` call plus `browseDay`'s inlined
+    /// equivalent. Rides in `PendingDayScroll.Key` so a reset that clears
+    /// ONLY the window-expansion fields (re-browsing the same day; #266's
+    /// re-tap of the active scope) still stales a pending scroll or pinned
+    /// rail highlight armed before it — those fields are excluded from the
+    /// key by design, so without this epoch such a reset changed nothing
+    /// the key could see (#254 scope addition). Window *growth*
+    /// (`goToDay`/`expandWindowEnd`) never bumps it: a pending deep-link
+    /// scroll is literally waiting for that growth, so it must never stale.
+    private(set) var scopeResetCount = 0
 
     /// Replaces the week selection wholesale — the strip owns tap/drag
     /// semantics (`WeekStripDrag.commit`); the model just stores the result.
@@ -1100,9 +1218,12 @@ final class AppModel {
     /// `clearScopeLocalDateState()` cleanup `selectScope` does — this is the
     /// other route out of `.day` and out of a `.next`-widened window.
     func setWeekSelection(_ weeks: Set<Int>) {
-        filter.dateScope = .all
-        filter.selectedWeeks = weeks
-        clearScopeLocalDateState()
+        // Copy-modify-assign — see `selectScope` (#267 review finding).
+        var next = filter
+        next.dateScope = .all
+        next.selectedWeeks = weeks
+        clearScopeLocalDateState(in: &next)
+        filter = next
         persistFilter()
     }
 
@@ -1129,11 +1250,24 @@ final class AppModel {
     /// date state.
     func browseDay(_ dayKey: String) {
         guard let parsed = ChqTime.parse("\(dayKey) 00:00:00") else { return }
-        filter.dateScope = .day
-        filter.selectedDayKey = ChqTime.dayKey(for: parsed)
-        filter.selectedWeeks = []
-        filter.windowStartDayKey = nil
-        filter.windowEndDayKey = nil
+        // The inlined scope-local reset below owes the same epoch bump as
+        // `clearScopeLocalDateState(in:)`: re-browsing the day already
+        // browsed changes no `PendingDayScroll.Key` field, and without the
+        // bump a pinned highlight or pending scroll from before the
+        // re-browse survived the window reset (#254 scope addition). Bumped
+        // BEFORE the assignment so the `didSet`'s rebuild captures the
+        // fresh epoch in `NavMatchingInputs`.
+        scopeResetCount += 1
+        // One batched assignment — the day is set while the window fields
+        // clear, and `filter`'s `didSet` rebuilds derived data once for the
+        // whole action (#267 review finding; `goToDay` set the pattern).
+        var next = filter
+        next.dateScope = .day
+        next.selectedDayKey = ChqTime.dayKey(for: parsed)
+        next.selectedWeeks = []
+        next.windowStartDayKey = nil
+        next.windowEndDayKey = nil
+        filter = next
         persistFilter()
     }
 
@@ -1260,6 +1394,14 @@ final class AppModel {
     /// row and individually removable, so leaving it behind after "Clear
     /// all" would be the surprising behavior.
     func clearAll() {
+        // A whole-selection replacement is a scope-local reset too: from an
+        // `.all` selection whose only non-default state is a window
+        // expansion, this clears ONLY the window fields, which
+        // `PendingDayScroll.Key` excludes — the epoch is what stales a
+        // target or pinned highlight armed before it (#254). Harmless in
+        // every other case: this method can never fire on pure window
+        // growth.
+        scopeResetCount += 1
         filter = FilterSelection(dateScope: .all)
         persistFilter()
     }
@@ -1429,8 +1571,10 @@ final class AppModel {
         // The expensive case this guard exists for is `expandWindowEnd()`
         // firing repeatedly as the reader scrolls — window-only changes, which
         // the key excludes and which are therefore correctly skipped. What
-        // remains is one redundant pass per deliberate scope tap, which no
-        // reader can perceive. A narrower, purpose-built fingerprint would
+        // remains is one redundant pass per deliberate scope tap — and,
+        // since the key now carries `scopeResetCount` (#254), one per
+        // same-day re-browse or same-scope re-tap — which no reader can
+        // perceive. A narrower, purpose-built fingerprint would
         // save that pass and introduce a far worse failure mode: omit one
         // input that does matter (weeks, venues, categories, favourites-only,
         // search) and `navMatching` goes silently stale, which shows up as a
@@ -1440,7 +1584,8 @@ final class AppModel {
         let inputs = NavMatchingInputs(
             snapshotFetchedAt: snapshot.fetchedAt,
             favorites: favorites,
-            filterKey: PendingDayScroll.key(for: filter, year: selectedYear))
+            filterKey: PendingDayScroll.key(
+                for: filter, year: selectedYear, scopeResets: scopeResetCount))
         guard inputs != lastNavMatchingInputs else { return }
         lastNavMatchingInputs = inputs
         rebuildNavMatching()
@@ -1561,14 +1706,28 @@ final class AppModel {
     /// exactly as if the flag were never wired up.
     static func launchNow() -> @Sendable () -> Date {
         #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if let flagIndex = arguments.firstIndex(of: "-uitest-freeze-now"),
-           arguments.index(after: flagIndex) < arguments.endIndex,
-           let frozen = ChqTime.parse(arguments[arguments.index(after: flagIndex)]) {
+        if let frozen = parsedFrozenNow(from: ProcessInfo.processInfo.arguments) {
             return { frozen }
         }
         #endif
         return { Date() }
+    }
+
+    /// The dataset year `ChqCalendarApp` hands to its `init` as
+    /// `pinnedYear`. In Release this is always `nil` — real launches always
+    /// take the year the server's manifest names. In DEBUG, honors
+    /// `-uitest-pin-year <year>` so an App Store capture run keeps rendering
+    /// the 2026 season however many seasons the manifest has moved on by
+    /// (#222); see `pinnedYear`'s own doc comment for why the clock pin
+    /// alone does not achieve that. A missing flag, or a value that is not
+    /// an integer, falls back to `nil` exactly as if the flag were never
+    /// wired up.
+    static func launchPinnedYear() -> Int? {
+        #if DEBUG
+        return parsedPinYear(from: ProcessInfo.processInfo.arguments)
+        #else
+        return nil
+        #endif
     }
 
     #if DEBUG
@@ -1579,6 +1738,53 @@ final class AppModel {
     /// screenshot-based verification when `xcrun simctl` can't synthesize a
     /// tap (see task-12 brief). This whole section compiles out of Release
     /// builds.
+
+    /// The value following `flag` in `arguments`, or `nil` if the flag is
+    /// absent or trailing (nothing follows it to read).
+    ///
+    /// The two launch pins parse their own value out of this rather than
+    /// each re-deriving "the argument after the flag" — and they take
+    /// `arguments` rather than reading `ProcessInfo` themselves so the parse
+    /// is testable without re-launching the test process under different
+    /// arguments. Worth doing now that *every* shot in the screenshot plan
+    /// depends on the clock parse, not just the one off-season shot it was
+    /// originally written for.
+    static func launchArgumentValue(_ flag: String, in arguments: [String]) -> String? {
+        guard let flagIndex = arguments.firstIndex(of: flag) else { return nil }
+        let valueIndex = arguments.index(after: flagIndex)
+        guard valueIndex < arguments.endIndex else { return nil }
+        return arguments[valueIndex]
+    }
+
+    /// The `-uitest-freeze-now` value in `arguments`, parsed as NY
+    /// wall-clock — `nil` if the flag is absent, trailing, or followed by
+    /// something `ChqTime.parse` rejects.
+    static func parsedFrozenNow(from arguments: [String]) -> Date? {
+        launchArgumentValue("-uitest-freeze-now", in: arguments).flatMap { ChqTime.parse($0) }
+    }
+
+    /// The `-uitest-pin-year` value in `arguments` — `nil` if the flag is
+    /// absent, trailing, or followed by a non-integer.
+    ///
+    /// Deliberately does **not** bound the year to something plausible,
+    /// though review has asked for it twice. Note first that no bound exists
+    /// today: `Int("-5")` succeeds, so `-uitest-pin-year -5` pins year -5 and
+    /// the app goes looking for `all-events--5.json`. That fails visibly —
+    /// the operator sees an empty app and goes looking at the flag they just
+    /// typed. Rejecting the value here would instead return `nil`, and `nil`
+    /// does not mean "bad pin", it means *no pin*: the app quietly renders
+    /// the current season and looks entirely correct while ignoring the
+    /// argument it was handed. For a hook whose only job is to make a launch
+    /// depict something other than now, failing loudly beats failing into
+    /// today.
+    ///
+    /// The plausibility check therefore lives where a run can actually be
+    /// stopped and a reason printed — `capture-screenshots.sh`, which
+    /// requires a 4-digit year before booting a simulator. That is the only
+    /// such check in the system, not a second line of defense.
+    static func parsedPinYear(from arguments: [String]) -> Int? {
+        launchArgumentValue("-uitest-pin-year", in: arguments).flatMap { Int($0) }
+    }
 
     /// Set by `CalendarView` on launch when `-uitest-show-filters` is
     /// present. Its original consumer — the four-row `FilterBarView` — is
@@ -1621,6 +1827,11 @@ final class AppModel {
     /// app as idle and hands control back to the test immediately after the
     /// tap, giving it a real window to act in. `0` (the default, and the
     /// value in every real launch) keeps this path fully inert.
+    ///
+    /// Mutually exclusive with `uiTestScrollsToDrop` below: a delay shorter
+    /// than the drop-retry window is swallowed by it, so the pair produces a
+    /// failure unrelated to whatever the test is probing (#252).
+    /// `UITestScrollHooks.parse` rejects a launch that passes both flags.
     var uiTestPendingScrollDelay: TimeInterval = 0
 
     /// How many of the next `proxy.scrollTo` calls `EventListView.issueScroll`
@@ -1645,6 +1856,10 @@ final class AppModel {
     /// function.
     ///
     /// `0` (the default, and every real launch) keeps this fully inert.
+    ///
+    /// Mutually exclusive with `uiTestPendingScrollDelay` above — the
+    /// retry chain and a deferred `resolvePendingScroll` interfere (#252) —
+    /// and `UITestScrollHooks.parse` rejects a launch that passes both flags.
     var uiTestScrollsToDrop = 0
 
     /// The first `(day, week)` pairing — in `days` display order — whose
@@ -1655,7 +1870,7 @@ final class AppModel {
     /// latter has anything to open. `nil` when nothing in the current
     /// selection has a themed week.
     ///
-    /// Takes the caller's already-computed `days` — `EventListView.list(days:)`'s
+    /// Takes the caller's already-computed `days` — `EventListView.list(rendered:)`'s
     /// own `days` parameter — rather than reading `dayGroups` itself.
     /// `dayGroups` is deliberately uncached (see the comment above) and
     /// re-runs the whole filter+group pipeline on every access, so this used

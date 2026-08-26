@@ -47,7 +47,9 @@ function eventsPayload() {
         endDate: `${YEAR}-07-06T11:45:00`,
         location: 'Amphitheater',
         description: 'A lecture.',
-        categories: ['Lecture'],
+        // `Array<{ name: string }>`, per `Event` in lib/types — NOT a bare
+        // string array. See the parse guard below for what that costs.
+        categories: [{ name: 'Lecture' }],
       },
       {
         id: 'e2',
@@ -56,7 +58,7 @@ function eventsPayload() {
         endDate: `${YEAR}-07-07T22:00:00`,
         location: 'Amphitheater',
         description: 'A concert.',
-        categories: ['Music'],
+        categories: [{ name: 'Music' }],
       },
     ],
   };
@@ -104,7 +106,11 @@ const toggleButton = () =>
 
 async function renderPage() {
   render(<Home />);
-  // The rail only exists once events have loaded.
+  // Waits for the first commit that has the header in it. Deliberately NOT
+  // described as "once events have loaded" any more, which is what it used to
+  // say and was never true: the rail is built from the season's navigable
+  // bounds, so it renders whether the feed brought anything back or not. That
+  // wording is part of why an empty fixture went unnoticed here for so long.
   await waitFor(() => expect(document.querySelector('[data-day-rail]')).toBeTruthy());
 }
 
@@ -127,6 +133,38 @@ describe('page.tsx — the sticky filter header', () => {
 
     expect(requested.length).toBeGreaterThan(0);
     expect(requested.every(p => p.endsWith(`all-events-${YEAR}.json`))).toBe(true);
+  });
+
+  // Asking for the right file is not the same as the app being able to read
+  // it, and the difference is invisible from everything else in this suite.
+  //
+  // A fixture using a bare string array for `categories` throws before the
+  // fetch result is ever stored. `useEventData` maps every raw event through
+  // `decodeEventHtmlEntities` first (`useEventData.ts`, before `setEvents`),
+  // and that reads `cat.name` — `undefined` on a string — then calls
+  // `.toLowerCase()` on it while building `_tagsLowerSet`
+  // (`eventHelpers.ts:63`, confirmed as the throw site by stack frame, not by
+  // reading). The outer `catch` only logs, so `events` stays empty and the
+  // page renders as though the feed were down.
+  //
+  // Note it is NOT `useEventData`'s own category/tag derivation that chokes —
+  // that code never runs on this path. An earlier version of this comment
+  // said it did, which would have sent the next reader to the wrong function.
+  //
+  // Every other assertion in this file still passed throughout, because they
+  // are all about header geometry, which renders with or without events. This
+  // file spent its life exercising a page that had none.
+  //
+  // The count comes from `ActiveFilters`, so it is the app's own reading of
+  // how many events it holds. The denominator is pinned and the numerator is
+  // not: the fixture is dated mid-season, so how many fall inside the default
+  // scope depends on when the suite runs, but how many were LOADED does not.
+  it('parses the fixture into the page, rather than silently loading none', async () => {
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/^Events \(\d+\/2\)$/)).toBeInTheDocument()
+    );
   });
 
   it('renders the filter card in flow at the top of the page, with no toggle', async () => {
@@ -157,13 +195,21 @@ describe('page.tsx — the sticky filter header', () => {
   });
 
   // The card leaves by riding up on the header's negative offset instead.
+  //
+  // The `--site-header-offset` term is the site header's reveal on scroll up
+  // (#272): `0px` while it is hidden, so this parks exactly as it always did,
+  // and its measured height while it is revealed, which rides the rail down to
+  // sit below it. It is a CSS variable rather than a prop precisely so the
+  // reveal does not re-render this page.
+  const PARKED = 'calc(var(--site-header-offset, 0px) - var(--filter-card-h, 0px))';
+
   it('parks the header by the measured card offset when the panel is not overlaying', async () => {
     await renderPage();
 
-    expect(header().style.top).toBe('calc(-1 * var(--filter-card-h, 0px))');
+    expect(header().style.top).toBe(PARKED);
 
     scrollPastHeader();
-    expect(header().style.top).toBe('calc(-1 * var(--filter-card-h, 0px))');
+    expect(header().style.top).toBe(PARKED);
   });
 
   it('pins the header at the viewport top while the panel is open over the list', async () => {
@@ -172,7 +218,7 @@ describe('page.tsx — the sticky filter header', () => {
 
     fireEvent.click(toggleButton()!);
 
-    expect(header().style.top).toBe('0px');
+    expect(header().style.top).toBe('var(--site-header-offset, 0px)');
   });
 
   // Below, not above. Above the header the sentinel stops moving with the

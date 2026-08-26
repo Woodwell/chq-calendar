@@ -23,7 +23,7 @@ nonisolated enum FilterChipState {
     ///   ignoring.
     ///
     ///   This is the fix for the state where a persisted `.next` scope
-    ///   viewed against a past season left `DateFilterSheet`'s sole
+    ///   viewed against a past season left `FilterSheet`'s sole
     ///   visible chip — "All", the only date control on offer — rendering
     ///   unselected over a list that was not date-filtered at all. Note
     ///   the fix belongs **here** and not at the call site: an earlier
@@ -46,9 +46,14 @@ nonisolated enum FilterChipState {
         switch scope {
         case .thisWeek:
             if effective == .thisWeek { return true }
-            // Selecting *only* the current week is the same range as
-            // "This Week"; selecting it alongside others is not. That
-            // equivalence is itself a current-year concept — off-year there
+            // Selecting *only* the current week is what a reader means by
+            // "This Week"; selecting it alongside others is not. The two are
+            // no longer quite the same RANGE, though: since #257 a week
+            // selection takes both of its boundary Saturdays whole, while
+            // `.thisWeek` stays noon-bounded (`ViewWindow.base`). The chip
+            // still lights, because it names the reader's intent rather than
+            // asserting the windows are byte-identical. That correspondence
+            // is itself a current-year concept — off-year there
             // is no "current week" for the browsed season to match against
             // — so it is additionally gated on `isCurrentYear`, matching the
             // unconditional `false` the old `guard isCurrentYear else` block

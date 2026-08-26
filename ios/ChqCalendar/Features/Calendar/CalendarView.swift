@@ -22,6 +22,10 @@ struct CalendarView: View {
     /// before committing the draft into the model.
     @State private var searchDraft: String = ""
 
+    /// Drives the toolbar's magnifier button (#256). `.searchFocused` is
+    /// iOS 18+, which is the deployment target.
+    @FocusState private var isSearchFocused: Bool
+
     /// iPad-only: the event shown in the split view's detail column.
     /// Unused (and un-navigated) in compact mode, where `EventListView`
     /// pushes via `NavigationLink` instead.
@@ -62,6 +66,26 @@ struct CalendarView: View {
             if committed != searchDraft { searchDraft = committed }
         }
         .task {
+            #if DEBUG
+            // Validated *before* `model.start()`, deliberately. #252 asks for
+            // an incompatible pair of scroll hooks to be rejected "at
+            // launch", and `start()` is not instant — on a cold install it
+            // reaches the network for `availableYears()` — so validating
+            // after it would put an arbitrary wait, and a loading spinner, in
+            // front of a launch that is already known-bad. Parsing is pure
+            // and reads only `ProcessInfo`, so it has nothing to wait for.
+            //
+            // Only the *check* moves. The parsed values are applied in
+            // `applyUITestHooks` below, after the model settles, exactly
+            // where they were — so a launch with valid flags (or none) is
+            // unaffected in both what happens and when.
+            let scrollHooks: (delay: TimeInterval, dropCount: Int)
+            do {
+                scrollHooks = try UITestScrollHooks.parse(ProcessInfo.processInfo.arguments)
+            } catch {
+                preconditionFailure(String(describing: error))
+            }
+            #endif
             await model.start()
             // Covers the case where a deep link arrived (setting
             // `pendingDeepLink`) before this `.task` ran, and `start()`
@@ -71,7 +95,7 @@ struct CalendarView: View {
             // changes if a cached snapshot loads directly into `.ready`.
             consumePendingDeepLinkIfPossible()
             #if DEBUG
-            await applyUITestHooks()
+            await applyUITestHooks(scrollHooks: scrollHooks)
             #endif
         }
         // Scene-level concerns — `.onOpenURL`, Spotlight's
@@ -128,40 +152,54 @@ struct CalendarView: View {
         }
     }
 
-    // `placement: .navigationBarDrawer(displayMode: .always)` on both
-    // containers below is load-bearing on iOS 26 inside the tab shell
-    // (task 16). The default placement there is a bottom-anchored field,
-    // which occupies the same screen edge as `RootTabView`'s tab bar —
-    // verified by screenshot: the tab bar rendered ON TOP of the bottom
-    // toolbar group (date pill, Filters, search all present but covered
-    // and unusable). Pinning search under the navigation bar vacates the
-    // bottom edge; `EventListView` drops its
-    // `DefaultToolbarItem(kind: .search)` in the same change (that item
-    // existed only to re-surface the bottom-anchored field next to the
-    // date/filter pills — see its old comment there). `.always` rather
-    // than `.automatic` so search stays discoverable without knowing the
-    // pull-down gesture. On iOS 18 this placement is where the field
-    // rendered anyway; the explicit `displayMode` is the only behavior
-    // change there (visible without scrolling).
+    // `placement: .navigationBarDrawer` is load-bearing and must not become
+    // `.automatic`: on iOS 26 the default placement is a bottom-anchored
+    // field, which occupies the same screen edge as `RootTabView`'s tab bar
+    // — verified by screenshot, the tab bar rendered ON TOP of the bottom
+    // toolbar group and everything in it was present but unusable. Pinning
+    // search under the navigation bar is what vacates the bottom edge.
+    //
+    // `displayMode` is `.automatic` since #256, so the field scrolls away
+    // with the content instead of costing 52pt on every screen forever.
+    // `.always` was originally chosen so search stayed discoverable without
+    // knowing the pull-down gesture; the toolbar's magnifier button
+    // (`EventListView.toolbarContent`) is what buys that discoverability
+    // now, at no permanent vertical cost. Do not restore `.always` without
+    // also removing that button — two ways to reach the same field, one of
+    // which is always on screen, is the state this change left.
+    //
+    // `searchFieldDisplayMode` below reverts to `.always` while
+    // `model.filter.searchText` (the committed value, not `searchDraft`) is
+    // non-empty — screenshot-verified `.automatic` alone scrolls the field
+    // away mid-term just like it does when empty, which would strand an
+    // active "meditation" search with no visible field to read or clear
+    // short of scrolling back to the top or reopening it via the magnifier.
+    // A live term is exactly the moment the field needs to stay reachable.
+    private var searchFieldDisplayMode: SearchFieldPlacement.NavigationBarDrawerDisplayMode {
+        model.filter.searchText.isEmpty ? .automatic : .always
+    }
+
     private var stackView: some View {
         NavigationStack(path: $path) {
-            EventListView(model: model, selection: nil)
+            EventListView(model: model, selection: nil, searchFocus: $isSearchFocused)
         }
         .searchable(
             text: $searchDraft,
-            placement: .navigationBarDrawer(displayMode: .always),
+            placement: .navigationBarDrawer(displayMode: searchFieldDisplayMode),
             prompt: "Search events")
+        .searchFocused($isSearchFocused)
         .submitLabel(.search)
         .onSubmit(of: .search) { KeyboardDismisser.dismiss() }
     }
 
     private var splitView: some View {
         NavigationSplitView {
-            EventListView(model: model, selection: $selectedEvent)
+            EventListView(model: model, selection: $selectedEvent, searchFocus: $isSearchFocused)
                 .searchable(
                     text: $searchDraft,
-                    placement: .navigationBarDrawer(displayMode: .always),
+                    placement: .navigationBarDrawer(displayMode: searchFieldDisplayMode),
                     prompt: "Search events")
+                .searchFocused($isSearchFocused)
                 .submitLabel(.search)
                 .onSubmit(of: .search) { KeyboardDismisser.dismiss() }
         } detail: {
@@ -197,7 +235,7 @@ struct CalendarView: View {
     /// identical launches of the same build, back to back, differed only in
     /// whether this raced. The retry below forces one more full refresh
     /// before giving up, which is enough to clear it in practice.
-    private func applyUITestHooks() async {
+    private func applyUITestHooks(scrollHooks: (delay: TimeInterval, dropCount: Int)) async {
         let arguments = ProcessInfo.processInfo.arguments
 
         // Any `-uitest-*` launch is a screenshot/automation context, so a
@@ -224,20 +262,23 @@ struct CalendarView: View {
             model.uiTestShowWeekTheme = true
         }
 
-        // `-uitest-delay-pending-scroll` — see `AppModel.uiTestPendingScrollDelay`
-        // for why a UI test needs this to exercise the day rail's pending-
-        // scroll staleness check at all. 3 seconds is comfortably longer
-        // than opening the date sheet and tapping a scope chip takes.
-        if arguments.contains("-uitest-delay-pending-scroll") {
-            model.uiTestPendingScrollDelay = 3
+        // The two scroll hooks — `-uitest-delay-pending-scroll` (see
+        // `AppModel.uiTestPendingScrollDelay`) and `-uitest-drop-scrolls <n>`
+        // (see `AppModel.uiTestScrollsToDrop`) — arrive already parsed and
+        // already validated: they are mutually exclusive, and the `.task`
+        // above rejected the pair before `model.start()` was even awaited
+        // (#252). Only the application is left to do here, at the same point
+        // in the launch as every other hook below.
+        //
+        // Assigned only when non-inert: `AppModel` is `@Observable`, whose
+        // generated setter fires a mutation for *every* write, equal value or
+        // not, so writing a 0 over the default 0 would be a real (if small)
+        // behaviour change on every non-scroll UI-test launch.
+        if scrollHooks.delay > 0 {
+            model.uiTestPendingScrollDelay = scrollHooks.delay
         }
-
-        // `-uitest-drop-scrolls <n>` — see `AppModel.uiTestScrollsToDrop` for
-        // why a UI test needs to be able to make a `scrollTo` do nothing.
-        if let flagIndex = arguments.firstIndex(of: "-uitest-drop-scrolls"),
-           arguments.index(after: flagIndex) < arguments.endIndex,
-           let count = Int(arguments[arguments.index(after: flagIndex)]), count > 0 {
-            model.uiTestScrollsToDrop = count
+        if scrollHooks.dropCount > 0 {
+            model.uiTestScrollsToDrop = scrollHooks.dropCount
         }
 
         if arguments.contains("-uitest-show-about") {

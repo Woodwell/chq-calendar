@@ -37,13 +37,20 @@ jobs:
     # two copies of the Xcode-selection and simulator-resolution steps that
     # would silently drift apart.
     #
-    # Why split at all: the ~21 XCUITests each boot the app and account for
-    # most of a ~20-minute combined run: measured on this runner, the UI leg
-    # executes 18 tests in 999s while the unit leg's 852 tests across 63
-    # suites execute in under four seconds. Combined, a one-line Swift mistake
-    # took ~20 minutes to surface. Split, the first run measured 6m31s for the
-    # unit leg against 20m59s for the UI leg — so the common failure is seen
-    # ~3x sooner without weakening the gate.
+    # Why split at all: the XCUITests dominate a combined run. Measured on
+    # this runner, the UI leg executed 18 tests in 999s while the unit leg's
+    # 852 tests across 63 suites executed in under four seconds. Combined, a
+    # one-line Swift mistake took ~20 minutes to surface. Split, the first run
+    # measured 6m31s for the unit leg against 20m59s for the UI leg — so the
+    # common failure is seen ~3x sooner without weakening the gate.
+    #
+    # What that cost is NOT, despite an earlier version of this comment
+    # saying so (#259): the per-test app launches. Launching is cheap —
+    # LaunchFixtureUITests does nothing else and takes ~6.7s, the median test
+    # is ~18s, and all 25 launches together are ~9% of test time. Rewriting
+    # tests to share a launch would trade real interaction coverage for
+    # almost nothing. Measure before optimising here; the cost has twice now
+    # turned out to sit somewhere other than where it looked.
     #
     # Note what the split does NOT save: both legs still do a full build, so
     # the unit leg's wall clock is almost entirely compilation, not its four
@@ -164,11 +171,16 @@ jobs:
           # Interleaves xcodebuild's stdout/stderr in real time so a failure
           # appears next to the work that caused it in the job log.
           NSUnbufferedIO: YES
-        # CODE_SIGNING_ALLOWED=NO is required, not cosmetic. Without it,
-        # AppGroupTests.containerURLIsNilInTheUnitTestHost fails on a signed
-        # run: it asserts there is NO App Group entitlement, which is exactly
-        # the condition this flag creates. Its own doc comment names the flag.
-        # Dropping it turns a green tree red.
+        # CODE_SIGNING_ALLOWED=NO is required, not cosmetic: these runners
+        # have no signing identity and no provisioning profile, so a build
+        # that tries to sign fails outright. Simulator builds do not need
+        # signing, and this is how you say so.
+        #
+        # It used to be justified here by a test that asserted the App Group
+        # container was absent under an unsigned run. #235 deleted that test
+        # — the container's presence is a property of the simulator, not of
+        # this flag — so the signing-identity reason above is now the whole
+        # reason. Keep the flag; it was never the test's to justify.
         #
         # Both legs compile all three source trees: the ChqCalendar scheme
         # builds the ChqCalendarWidgets target too (it is embedded in the app),

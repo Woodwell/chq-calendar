@@ -10,13 +10,10 @@
  */
 import { chromium } from 'playwright';
 import { pinClock } from './fixedNow.mjs';
+import { check, skip, finish } from './results.mjs';
+import { enterList, currentRegime } from './regime.mjs';
 
 const URL = process.env.URL ?? 'http://localhost:3000/';
-const results = [];
-function check(name, ok, detail) {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
-}
 
 const browser = await chromium.launch();
 
@@ -74,11 +71,73 @@ async function newPage({ width = 900, height = 900, storage } = {}) {
     await page.addInitScript(([k, v]) => localStorage.setItem(k, v), storage);
   }
   await page.goto(URL, { waitUntil: 'networkidle' });
-  await page.waitForSelector('[data-day-key]', { timeout: 30000 });
+  // Off-season the default screen is the landing, not a day list; see
+  // `regime.mjs` for what this does about it.
+  await enterList(page);
   return page;
 }
 
 const railChips = p => p.$$eval('[data-day-rail] [data-chip]', els => els.map(e => e.dataset.chip));
+
+/**
+ * A rail chip past the current render window that a user can actually tap.
+ *
+ * Checks 9 and 11 need "a day several past the render window" to prove that
+ * navigation can outrun it. The old selection was `chips[lastMountedIdx + 6]`,
+ * which is an *index*, blind to what the chip is: the rail spans every
+ * calendar day in the navigable bounds, and a day with no events is
+ * `aria-disabled` with a guarded onClick — tapping it does nothing, by
+ * documented design (see DayRail.tsx and checks 14a2/14b, which assert
+ * exactly that contract). Mid-season every day has events and the index
+ * happened to land on a live chip; in the season's tail (2026-08-24: last
+ * mounted day + 6 = 2026-09-01, zero events, next event day 2026-09-10) it
+ * landed on a dead one and 9a/11a failed on a correct app. Winter's sparse
+ * event days would have hit the same wall.
+ *
+ * So the target is picked from what the rail itself declares tappable, in
+ * falling order of preference:
+ *
+ *  1. The first enabled chip at least 6 chips past the last mounted day
+ *     with >= 10 events on it and after it — the original intent, plus a
+ *     floor of content below the landing point so "scrolled to it" (9b)
+ *     measures a real scroll rather than a document-bottom clamp (the
+ *     season's last day has 1 event; jumping there bottoms out ~470px
+ *     short of the rail through no fault of the app's).
+ *  2. The farthest enabled chip past the last mounted day meeting the same
+ *     content floor — the season's tail, where nothing 6+ days out is
+ *     viable but nearer unmounted days are.
+ *  3. The farthest enabled chip past the last mounted day — almost nothing
+ *     left ahead; navigation across the gap is still exercised, and 9b's
+ *     bottomed-out disjunct absorbs the clamp.
+ *  4. The last mounted day itself — everything reachable is already
+ *     mounted (the season's final days, off-season), so "outrunning the
+ *     render window" has no test to run and the checks degrade to the
+ *     tap-lands-clear and ⟳-Now mechanics on a day that is already there.
+ *     This mirrors the old `?? chips[chips.length - 1]` fallback, which in
+ *     that regime resolved to the same already-mounted final day.
+ */
+async function pickFarTarget(page) {
+  const chips = await page.$$eval('[data-day-rail] [data-chip]', els => els.map(e => ({
+    key: e.dataset.chip,
+    enabled: e.getAttribute('aria-disabled') !== 'true',
+    // "…, 32 events" / "…, 1 event" / "…, no events" — the label format
+    // checks 14a/14b hold stable. "no events" parses to 0 by falling
+    // through the match.
+    count: Number(/(\d+) events?$/.exec(e.getAttribute('aria-label') ?? '')?.[1] ?? 0),
+  })));
+  const mounted = await page.$$eval('[data-day-key]', e => e.map(x => x.dataset.dayKey));
+  const lastMounted = mounted[mounted.length - 1];
+  const from = chips.findIndex(c => c.key === lastMounted);
+  // suffix[i] = events on chip i and every chip after it — an upper bound on
+  // what can end up mounted below the landing point.
+  const suffix = new Array(chips.length).fill(0);
+  for (let i = chips.length - 1, acc = 0; i >= 0; i--) { acc += chips[i].count; suffix[i] = acc; }
+  const qualifies = i => chips[i].enabled && suffix[i] >= 10;
+  for (let i = from + 6; i < chips.length; i++) if (qualifies(i)) return chips[i].key;
+  for (let i = chips.length - 1; i > from; i--) if (qualifies(i)) return chips[i].key;
+  for (let i = chips.length - 1; i > from; i--) if (chips[i].enabled) return chips[i].key;
+  return lastMounted;
+}
 const anchorChip = p => p.$$eval('[data-day-rail] [data-chip][aria-current="date"]', e => e[0]?.dataset.chip ?? null);
 const railHeight = p => p.evaluate(() =>
   parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--day-rail-h')) || 0);
@@ -107,7 +166,19 @@ const railHeight = p => p.evaluate(() =>
 }
 
 // ------------------------------------------- 3. persisted 'this-week' migration
-{
+//
+// The guard sits OUTSIDE `newPage()` on purpose. With `this-week` persisted
+// the reader has a non-default filter, so off-season they get the generic
+// empty state rather than the landing — `enterList` has no branch that could
+// rescue this page, and correctly refuses it.
+//
+// `currentRegime()` throws if nothing has bootstrapped yet, which makes the
+// dependency on checks 1-2 running first loud rather than silent.
+if (currentRegime() === 'off-season') {
+  skip('3 persisted this-week migration',
+    "off-season 'this-week' resolves to no window at all, by design — the rail " +
+    'hides and no day section mounts, so 3b would assert against the contract');
+} else {
   const page = await newPage({
     storage: ['chq-calendar-user-state', JSON.stringify({
       dateFilter: 'this-week', selectedWeeks: [], searchTerm: '',
@@ -186,21 +257,35 @@ for (const scrolled of [false, true]) {
 // --------------------------------------------------- 9. rail tap lands clear
 {
   const page = await newPage();
-  const chips = await railChips(page);
-  const mounted = await page.$$eval('[data-day-key]', e => e.map(x => x.dataset.dayKey));
-  // A day several past the current render window — the case that fails if
-  // navigation cannot outrun the render window.
-  const target = chips[chips.indexOf(mounted[mounted.length - 1]) + 6] ?? chips[chips.length - 1];
+  // A tappable day several past the current render window — the case that
+  // fails if navigation cannot outrun the render window. See pickFarTarget
+  // for why "tappable" is load-bearing.
+  const target = await pickFarTarget(page);
   await page.evaluate(k => document.querySelector(`[data-day-rail] [data-chip="${k}"]`).click(), target);
   await page.waitForTimeout(1800);
   const present = await page.$(`[data-day-key="${target}"]`);
   check('9a tapped day mounts', !!present, target);
   if (present) {
-    const { top, railH } = await page.evaluate(k => ({
+    const { top, railH, bottomedOut } = await page.evaluate(k => ({
       top: document.querySelector(`[data-day-key="${k}"]`).getBoundingClientRect().top,
       railH: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--day-rail-h')) || 0,
+      // This RELAXES 9b: the strict form is "section top within 400px of the
+      // viewport top", and this alternative accepts "the page scrolled to the
+      // very end of a document it actually had to scroll" instead. It can
+      // fire only in the season's last days, when the target is so near the
+      // rail's end that less than a viewport of content exists below it and
+      // the scroll clamps before the section reaches the rail (2026-08-28
+      // with the live feed: target 09-10 stops 468px short). Both conditions
+      // below are required: without the scrollHeight guard, a document that
+      // simply fits the viewport satisfies `scrollY(0) + innerHeight >=
+      // scrollHeight` untouched, and in exactly the last-days regime — where
+      // rule 4 already hands 9a an always-mounted target — 9b would become
+      // unfalsifiable.
+      bottomedOut: document.documentElement.scrollHeight > window.innerHeight + 2
+        && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2,
     }), target);
-    check('9b scrolled to it', Math.abs(top) < 400, `top=${top.toFixed(1)}px`);
+    check('9b scrolled to it', Math.abs(top) < 400 || bottomedOut,
+      `top=${top.toFixed(1)}px bottomedOut=${bottomedOut}`);
     check('9c lands below the rail, not under it', top >= railH - 2, `top=${top.toFixed(1)} railH=${railH}`);
   }
   await page.close();
@@ -225,16 +310,44 @@ for (const scrolled of [false, true]) {
 }
 
 // ------------------------------------------------------------------ 11. ⟳ Now
-{
+if (currentRegime() === 'off-season') {
+  skip('11 ⟳ Now',
+    'today is outside navBounds off-season, so reachableTodayKey is null and ' +
+    'the button is correctly absent (page.tsx) — there is no navigation back ' +
+    'to today left to test');
+} else {
   const page = await newPage();
-  const chips = await railChips(page);
-  const mounted = await page.$$eval('[data-day-key]', e => e.map(x => x.dataset.dayKey));
-  const far = chips[chips.indexOf(mounted[mounted.length - 1]) + 6] ?? chips[chips.length - 1];
+  // Same tappable-target rule as check 9 — the old blind index landed on an
+  // aria-disabled chip in the season's tail and the tap was a no-op, so ⟳
+  // Now never had a navigation to appear after.
+  const far = await pickFarTarget(page);
   await page.evaluate(k => document.querySelector(`[data-day-rail] [data-chip="${k}"]`).click(), far);
   await page.waitForTimeout(1500);
   const nowBtn = page.getByRole('button', { name: 'Go to today' });
   const appeared = await nowBtn.count() > 0;
-  check('11a ⟳ Now appears once away from today', appeared);
+  // This RELAXES 11a: the strict form is "the button appeared", and this
+  // alternative accepts its absence when the anchor is still on today AND
+  // the page scrolled to the very end of a document it actually had to
+  // scroll. It can fire only on the season's last mounted days (2026-08-31
+  // with the live feed: today has 2 events, one 1-event day follows), where
+  // even max scroll cannot move the anchor off today and the button is
+  // *correctly* absent — its render rule is anchor !== today, which 11c
+  // asserts from the other side. The scrollHeight guard is required: a
+  // document that simply fits the viewport satisfies `scrollY(0) +
+  // innerHeight >= scrollHeight` untouched, and combined with rule 4's
+  // always-mounted target that would make 11a unfalsifiable in exactly the
+  // regime this alternative exists for. A mid-season click that navigated
+  // nowhere leaves the page at the top of a tall document and still fails
+  // both legs.
+  const [anchorNow, todayNow, bottomedOutNow] = await Promise.all([
+    anchorChip(page),
+    page.evaluate(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date())),
+    page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2
+      && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2),
+  ]);
+  check('11a ⟳ Now appears once away from today',
+    appeared || (anchorNow === todayNow && bottomedOutNow),
+    `far=${far} anchor=${anchorNow} today=${todayNow} bottomedOut=${bottomedOutNow} button=${appeared}`);
   if (appeared) {
     const scopeBefore = await page.$$eval('button[aria-pressed]', els =>
       els.map(e => `${e.textContent.trim()}=${e.getAttribute('aria-pressed')}`).join(','));
@@ -474,10 +587,4 @@ for (const [label, width, zoom] of [['320px', 320, 1], ['200% zoom', 900, 2]]) {
 }
 
 await browser.close();
-
-const failed = results.filter(r => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
-if (failed.length) {
-  console.log('FAILED:\n' + failed.map(f => `  - ${f.name}: ${f.detail ?? ''}`).join('\n'));
-  process.exit(1);
-}
+finish();
