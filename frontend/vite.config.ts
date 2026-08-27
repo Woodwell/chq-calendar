@@ -132,6 +132,7 @@ const DEMO = process.env.VITE_DEMO === 'true';
  */
 function previewMiddleware(): PluginOption {
   const out = resolve(__dirname, 'out');
+  const classesOrigin = process.env.CLASSES_ORIGIN?.replace(/\/$/, '');
   return {
     name: 'preview-middleware',
     configurePreviewServer(server) {
@@ -147,6 +148,43 @@ function previewMiddleware(): PluginOption {
 
         if (!/^\/cache\/calendar-cache\/classes-\d{4}\.json$/.test(path)) {
           next();
+          return;
+        }
+
+        // With an origin set, fetch rather than read — the same thing the
+        // demo host's Caddy does, so this exercises the real path: the
+        // distribution, its cache policy, and the bucket policy behind it.
+        // Point it at `terraform output catalog_url` to check a deploy
+        // before touching the droplet.
+        //
+        // Server-side, so no VITE_ prefix: this never reaches the bundle,
+        // and the browser only ever sees a same-origin URL.
+        if (classesOrigin) {
+          void (async () => {
+            try {
+              const upstream = await fetch(new URL(path, classesOrigin));
+              const body = Buffer.from(await upstream.arrayBuffer());
+              if (!upstream.ok) {
+                // Pass the status through rather than translating it. A 403
+                // here means the bucket policy did not admit CloudFront and a
+                // 404 means nothing has been published yet — two different
+                // problems that an invented 500 would merge into one.
+                res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  error: `${classesOrigin}${path} answered ${upstream.status}`,
+                  body: body.toString('utf8').slice(0, 300),
+                }));
+                return;
+              }
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(body);
+            } catch (err) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                error: `Could not reach ${classesOrigin}: ${(err as Error).message}`,
+              }));
+            }
+          })();
           return;
         }
         // Two places, in the order of how much they resemble a real deploy.

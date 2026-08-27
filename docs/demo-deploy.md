@@ -233,9 +233,14 @@ fail in different ways:
 - **classes-2026.json** goes to the sandbox distribution. `403` means
   CloudFront reached S3 but the bucket policy did not admit it — check that
   `aws_s3_bucket_policy.catalog` applied and that its `AWS:SourceArn` matches
-  this distribution. `404` means the pipeline has not published yet; invoke
-  the Lambda in `full` mode. `421` means the `Host` header is not reaching
-  CloudFront as its own domain.
+  this distribution. `404` means the pipeline has not published that year
+  yet; invoke the Lambda in `full` mode. `421` means the `Host` header is not
+  reaching CloudFront as its own domain.
+
+  Those two codes only tell you apart because the policy grants `ListBucket`
+  as well as `GetObject`. Without it S3 answers `403` for a key that simply
+  is not there, and a missing catalog is indistinguishable from a broken
+  policy — which is how this paragraph was wrong when first written.
 - **years.json** goes to the live site, and `421` there means the same thing
   about `www.chqcal.org`.
 

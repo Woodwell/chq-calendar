@@ -318,6 +318,24 @@ resource "aws_s3_bucket_policy" "catalog" {
             "AWS:SourceArn" = aws_cloudfront_distribution.catalog.arn
           }
         }
+      },
+      {
+        # The same reason the function's own policy carries it: without
+        # ListBucket, S3 answers 403 for a key that merely does not exist,
+        # so "the policy is wrong" and "nothing has been published for that
+        # year yet" become the same response. Granting it makes a missing
+        # catalog a 404 and leaves 403 meaning what it should.
+        Sid       = "AllowCloudFrontListCatalog"
+        Effect    = "Allow"
+        Principal = { Service = "cloudfront.amazonaws.com" }
+        Action    = "s3:ListBucket"
+        Resource  = aws_s3_bucket.catalog.arn
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.catalog.arn
+          }
+          StringLike = { "s3:prefix" = ["cache/calendar-cache/classes-*"] }
+        }
       }
     ]
   })
