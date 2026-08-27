@@ -5,9 +5,12 @@ network. Written for the droplet's existing Caddy container at
 `/opt/codeloft/caddy`. Nothing here is part of the app, and it can be dropped
 from any upstream PR.
 
-The demo is a static file tree — no runtime, no database, no backend — so it
-needs no container of its own. The existing Caddy serves it from a mounted
-directory.
+The demo is a static file tree, so it needs no container of its own — the
+existing Caddy serves it from a mounted directory. It is not entirely
+self-contained, though: the class catalog is fetched at request time from the
+sandbox pipeline in AWS (step 2), and the calendar's events are proxied from
+the live site. Neither has to be copied here, and neither is refreshed by
+redeploying.
 
 ## Paths, host and container
 
@@ -35,25 +38,38 @@ stamps the banner on `/classes` with the git SHA and build time, and adds a
 **Rebuild before every deploy.** The banner reports the commit it was built
 from, so a stale `out/` tells your reviewer it is something it is not.
 
-## 2. Stage the catalog
+## 2. The catalog — nothing to stage
 
-The published catalog is gitignored and exists nowhere else, so copy it to
-where a production build looks for it:
+The demo does not ship a catalog. It fetches whatever the sandbox pipeline
+last published, so a reviewer sees current spot counts rather than a snapshot
+frozen at deploy time — and a redeploy is no longer the way to refresh data.
+
+The path is `infrastructure/sandbox-classes` → S3 (private) → CloudFront →
+Caddy → the page. Stand it up once:
 
 ```bash
-mkdir -p frontend/out/cache/calendar-cache
-cp frontend/public/data/classes-2026.json frontend/out/cache/calendar-cache/
+terraform -chdir=infrastructure/sandbox-classes apply -var bucket_name=<your-bucket>
 ```
 
-Refresh it with `npm run sync:classes --workspace=chautauqua-backend` — a full
-crawl of the ticket site takes about three minutes. For spot counts alone,
-`-- --mode=spots` re-reads only the classes running soon, which is seconds
-rather than minutes.
+`terraform output catalog_url` then gives the domain the Caddyfile below
+proxies, and `terraform output caddy_classes_block` prints that block with the
+domain already filled in.
 
-The published file is the crawl merged with the printed catalog. If you have
-crawled but not merged — or have edited `config/SpecialStudies.csv` — run
-`npm run backfill:classes -- --write --workspace=chautauqua-backend`, which
-makes no network requests at all.
+Refresh the data by running the pipeline, not by rebuilding:
+
+```bash
+aws lambda invoke --function-name chq-classes-sandbox \
+  --payload '{"mode":"spots"}' --cli-binary-format raw-in-base64-out /dev/stdout
+```
+
+`spots` re-reads only the classes running soon — about 15 seconds. `full`
+re-crawls the whole catalog and takes roughly four minutes. Both publish to
+S3, and CloudFront caches for at most five minutes, so the demo catches up on
+its own.
+
+If you have edited `config/SpecialStudies.csv`, that changes the *compiled*
+catalog rather than the crawl: rebuild it with `npm run build:catalog
+--workspace=backend`, then redeploy the Lambda so the new file is bundled in.
 
 ## 3. rsync
 
@@ -71,14 +87,17 @@ rsync -av --delete --dry-run \
 
 Drop `--dry-run` once the file list looks right.
 
-About 4.8 MB rather than 15 MB, because two things are excluded:
+About 3.9 MB rather than 9.8 MB, because of the first exclude:
 
-- **`data/*.json`** — 5.4 MB that production never requests. They ship only
+- **`data/*.json`** — 5.9 MB that production never requests. They ship only
   because Vite copies everything in `public/`. Note the exclude is
   `data/*.json`, not `data/`: `data/weekly-themes/` **is** fetched in
-  production and has to stay.
-- **The rest of `cache/calendar-cache/`** — another 4.5 MB that Caddy proxies
-  from the live site instead of hosting.
+  production and has to stay. `classes-2026.json` is in here too, and is
+  meant to be excluded — the demo reads the catalog from AWS, not from a
+  copy that would be stale the moment it landed.
+- **`cache/calendar-cache/*`** — guards rather than savings. A demo build
+  emits no `cache/` directory at all; these excludes only stop a hand-staged
+  copy from an earlier deploy being served in place of the proxied original.
 
 ## 4. Caddyfile
 
@@ -110,11 +129,20 @@ Disallow: /` 200
 		respond 404
 	}
 
-	# The class catalog is ours and is the only thing under this prefix that
-	# exists on disk. This must come before the proxy below.
+	# The class catalog comes from the sandbox pipeline's CloudFront rather
+	# than from disk — see step 2. This must come before the catch-all proxy
+	# below, which would otherwise send it to the live site, where it does
+	# not exist.
+	#
+	# `header_up Host` for the same reason it appears below: CloudFront
+	# answers 421 Misdirected Request to a Host it does not recognise, and
+	# this distribution knows only its own name. Take the domain from
+	# `terraform output catalog_url`.
 	@classes path /cache/calendar-cache/classes-*.json
 	handle @classes {
-		file_server
+		reverse_proxy https://dXXXXXXXXXXXXX.cloudfront.net {
+			header_up Host dXXXXXXXXXXXXX.cloudfront.net
+		}
 	}
 
 	# Everything else the app fetches from that prefix — events, article and

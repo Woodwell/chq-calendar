@@ -211,6 +211,118 @@ resource "aws_lambda_permission" "spots" {
   source_arn    = aws_cloudwatch_event_rule.spots.arn
 }
 
+# ─────────────────────────────────────────────── serving the catalog to a demo
+#
+# The bucket above stays private. CloudFront reads it through an Origin Access
+# Control — the same arrangement ../main.tf uses for the production cache
+# bucket — so the only reader is the distribution, and the four public-access
+# blocks stay switched on. An OAC policy grants to a service principal with a
+# SourceArn condition, which S3 does not count as a public policy, so
+# `block_public_policy` and this can both be true.
+#
+# This exists so the demo host can fetch the catalog instead of shipping a
+# copy of it. See docs/demo-deploy.md: Caddy proxies this domain the same way
+# it already proxies the live site for events.
+
+resource "aws_cloudfront_origin_access_control" "catalog" {
+  name                              = "${var.name_prefix}-catalog-oac"
+  description                       = "Lets CloudFront read the private catalog bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# Short TTLs, because the whole point is that the demo shows what the sandbox
+# last published. A full crawl runs daily and a spots pass hourly, so a minute
+# of staleness is invisible while a day of it would make the page a liar —
+# CloudFront's usual 24h default is wrong for this object.
+resource "aws_cloudfront_cache_policy" "catalog" {
+  name        = "${var.name_prefix}-catalog"
+  comment     = "Brief caching for a file that is rewritten hourly"
+  min_ttl     = 0
+  default_ttl = 60
+  max_ttl     = 300
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
+# No alias and no certificate of its own: the demo reaches this through its
+# own hostname, and Caddy rewrites the Host header on the way past. Adding a
+# custom domain here would mean a cert in us-east-1 for a sandbox.
+#
+# `apply` waits for the distribution to reach Deployed, which takes several
+# minutes on first create. That wait is deliberate — it means the Caddyfile
+# change below is safe to make as soon as apply returns.
+resource "aws_cloudfront_distribution" "catalog" {
+  enabled     = true
+  comment     = "${var.name_prefix} class catalog for the demo host"
+  price_class = "PriceClass_100"
+
+  origin {
+    domain_name              = aws_s3_bucket.catalog.bucket_regional_domain_name
+    origin_id                = "s3-catalog"
+    origin_access_control_id = aws_cloudfront_origin_access_control.catalog.id
+  }
+
+  default_cache_behavior {
+    target_origin_id       = "s3-catalog"
+    viewer_protocol_policy = "https-only"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = aws_cloudfront_cache_policy.catalog.id
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+# Scoped to the same key pattern the function itself is allowed to write, so
+# the distribution can serve the catalog and nothing else. Anything else in
+# the bucket answers 403 rather than being quietly readable, which keeps this
+# correct if the bucket ever holds more than it does today.
+resource "aws_s3_bucket_policy" "catalog" {
+  bucket = aws_s3_bucket.catalog.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudFrontReadCatalog"
+        Effect    = "Allow"
+        Principal = { Service = "cloudfront.amazonaws.com" }
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.catalog.arn}/cache/calendar-cache/classes-*.json"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.catalog.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
 output "function_name" {
   value = aws_lambda_function.classes_ingest.function_name
 }
@@ -222,4 +334,21 @@ output "catalog_bucket" {
 output "invoke_full" {
   description = "Run a full crawl by hand"
   value       = "aws lambda invoke --function-name ${aws_lambda_function.classes_ingest.function_name} --payload '{\"mode\":\"full\"}' --cli-binary-format raw-in-base64-out /dev/stdout"
+}
+
+output "catalog_url" {
+  description = "What the demo host proxies for the class catalog"
+  value       = "https://${aws_cloudfront_distribution.catalog.domain_name}"
+}
+
+output "caddy_classes_block" {
+  description = "Drop-in replacement for the @classes handler in docs/demo-deploy.md"
+  value       = <<-EOT
+    @classes path /cache/calendar-cache/classes-*.json
+    handle @classes {
+    	reverse_proxy https://${aws_cloudfront_distribution.catalog.domain_name} {
+    		header_up Host ${aws_cloudfront_distribution.catalog.domain_name}
+    	}
+    }
+  EOT
 }
