@@ -227,8 +227,28 @@ curl -u reviewer:PASSWORD -o /dev/null -w '%{http_code}\n' https://demo.example.
 curl -o /dev/null -w '%{http_code}\n' https://demo.example.com/            # expect 401
 ```
 
-The third is the proxy: a 421 there means the `Host` header is not reaching
-CloudFront correctly.
+The second and third are both proxies now, to different origins, and they
+fail in different ways:
+
+- **classes-2026.json** goes to the sandbox distribution. `403` means
+  CloudFront reached S3 but the bucket policy did not admit it — check that
+  `aws_s3_bucket_policy.catalog` applied and that its `AWS:SourceArn` matches
+  this distribution. `404` means the pipeline has not published yet; invoke
+  the Lambda in `full` mode. `421` means the `Host` header is not reaching
+  CloudFront as its own domain.
+- **years.json** goes to the live site, and `421` there means the same thing
+  about `www.chqcal.org`.
+
+A quick way to tell a stale catalog from a broken one, since both look like
+an empty page:
+
+```bash
+curl -su reviewer:PASSWORD https://demo.example.com/cache/calendar-cache/classes-2026.json \
+  | head -c 120
+```
+
+`generatedAt` is the crawl's own timestamp in UTC, so it should be within an
+hour or so of the last pipeline run — not of the last deploy.
 
 ## Taking it down
 
