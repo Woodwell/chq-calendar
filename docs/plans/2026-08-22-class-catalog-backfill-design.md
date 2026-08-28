@@ -1,6 +1,9 @@
 # Class catalog: a printed baseline, and a crawl that reports change
 
-**Status:** Design, for discussion. Not implemented.
+**Status:** Implemented on `feat/classes-catalog`; the backend half is
+proposed upstream from `feat/classes-backend`. Kept as the rationale for the
+compiled-catalog approach. Current state and next steps are in
+`2026-08-28-special-studies-classes-status.md`.
 **Follows:** issue #246 (the `/classes` page and its scraper, built)
 
 ## The problem this solves
