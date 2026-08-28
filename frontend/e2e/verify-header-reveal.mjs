@@ -349,26 +349,30 @@ const deepAndHidden = async (p, y = 6000) => {
 // ────────────────────────── the filter panel, opened with the header revealed
 {
   // A composition the reader reaches in two taps: scroll up to bring the
-  // header back, then open Filters from the rail. Both are overlays over the
-  // list and both are driven by the same sticky `top`, so if the site header's
-  // term were added in one state and not the other they would overlap here and
-  // nowhere else.
+  // header back, then open Filters from the header itself (#274 phase 3 moved
+  // the funnel there from the rail). The panel hangs off the header's bottom
+  // edge and both read the same `--site-header-offset`, so if the term were
+  // applied to one and not the other they would overlap here and nowhere else.
   const p = await phone();
   await deepAndHidden(p);
   await wheel(p, -40);
   await settle(p);
 
   const revealed = await geometry(p);
-  const toggle = p.locator('[data-day-rail] button[aria-expanded]').first();
+  // `[aria-label="Filters"]` is load-bearing, not decorative. Narrowing on
+  // `[aria-expanded]` instead is what broke this suite once already: the day
+  // rail's week-chooser trigger carries it too, and so do the header's own
+  // link menus.
+  const toggle = p.locator('[data-site-header] button[aria-label="Filters"]').first();
   if (revealed.bottom <= 0 || await toggle.count() === 0) {
     skip('14 the filter panel opens below a revealed header',
-      revealed.bottom <= 0 ? 'the header did not reveal' : 'no Filters toggle on the rail');
+      revealed.bottom <= 0 ? 'the header did not reveal' : 'no Filters toggle in the header');
   } else {
     // A DOM click, not `locator.click()`. Playwright scrolls an element into
     // view before clicking it, and that scroll is a real one the app has no
     // way to know is ours — it hid the header, and the check then passed
     // vacuously with the panel at the top of an empty viewport.
-    await p.evaluate(() => document.querySelector('[data-day-rail] button[aria-expanded]').click());
+    await p.evaluate(() => document.querySelector('[data-site-header] button[aria-label="Filters"]').click());
     await p.waitForTimeout(700);
     const panel = await p.evaluate(() => {
       const card = document.querySelector('[data-filter-card]');
@@ -414,8 +418,9 @@ const deepAndHidden = async (p, y = 6000) => {
     });
     if (!emptied) {
       // The search field lives in the filter panel; open it from the rail
-      // first if it is not already reachable.
-      await p.evaluate(() => document.querySelector('[data-day-rail] button[aria-expanded]')?.click());
+      // first if it is not already reachable. aria-label narrows past the
+      // week chooser trigger — see `toggle` above.
+      await p.evaluate(() => document.querySelector('[data-day-rail] button[aria-expanded][aria-label="Filters"]')?.click());
       await p.waitForTimeout(700);
       await p.evaluate(() => {
         const field = document.querySelector('input[type="text"], input[type="search"]');
