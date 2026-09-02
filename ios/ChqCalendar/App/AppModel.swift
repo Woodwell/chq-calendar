@@ -401,31 +401,59 @@ final class AppModel {
     /// Whether the season is upcoming, live, or over for `selectedYear`, and
     /// (off-season) when the next one opens — see `LandingState` for why
     /// this exists (#177). Computed from the same `now()`/`selectedYear`/
-    /// `isCurrentYear` values `dayGroups` uses, but against a fresh
-    /// `FilterSelection()` rather than the user's current `filter`: this has
-    /// to answer "would the *default* view have anything to show", which is
-    /// a different question than "does the user's current filter have
-    /// anything to show" (an empty result from, say, an overly-narrow search
-    /// is not the app going empty off-season).
+    /// `isCurrentYear` values `dayGroups` uses, but against the snapshot's
+    /// events **unfiltered** — no `FilterSelection` at all, not even a
+    /// default one. The question is "does this year still have something
+    /// ahead", which is neither "does the user's current filter have
+    /// anything to show" (an empty result from an overly-narrow search is
+    /// not the app going empty off-season) nor "does the *default* filter"
+    /// (#288 — see below).
+    ///
+    /// **This used to be `filteredEvents(FilterSelection()).count`, and that
+    /// was the #288 defect.** The default filter is `.next`, whose adaptive
+    /// window is capped at 90 days (`EventFilter.adaptiveEndDate`), so the
+    /// probe silently inherited a *scope* limit as a *season* verdict. On
+    /// 2026-10-01 the server flips `defaultYear` to 2027, whose published
+    /// feed then held five events ~265 days out: the count read 0, and the
+    /// app showed "Almost showtime" with no buttons over a feed that had
+    /// events in it — for six months, while the web showed the list. Asking
+    /// the year's whole event set is what `landingState.ts` has always done
+    /// and what its module header promises the two apps agree on.
+    ///
+    /// The one hour of grace is `.next`'s own opening grace
+    /// (`ViewWindow.swift`'s `now.addingTimeInterval(-3600)`), carried here
+    /// deliberately rather than by coincidence: without it, the hour after
+    /// the season's last event *begins* would already report the season
+    /// over, covering a currently-running event with "See you next season".
+    /// The web derives the same predicate from the same hour (`page.tsx`).
     ///
     /// Without a `snapshot` yet, this deliberately reports `.inSeason` —
     /// meaning "no off-season claim to make" — rather than running
-    /// `LandingState.determine` with a count forced to `0`. An offline first
+    /// `LandingState.determine` against an empty event set. An offline first
     /// launch (or any snapshot-less state) has no event data to say
-    /// anything about the calendar from, and `0` upcoming events for that
-    /// reason looks identical to `determine` as `0` upcoming events because
-    /// the season is over: mid-July 2026, offline, would otherwise
-    /// misreport `.postSeason`. `phase` (`.launching`/`.offline`/`.failed`)
-    /// already owns what the screen shows while there's no snapshot; this
-    /// property only has something to say once real event data exists.
+    /// anything about the calendar from, and "no upcoming events" for that
+    /// reason looks identical to "no upcoming events because the season is
+    /// over": mid-July 2026, offline, would otherwise misreport
+    /// `.postSeason`. `phase` (`.launching`/`.offline`/`.failed`) already
+    /// owns what the screen shows while there's no snapshot; this property
+    /// only has something to say once real event data exists. `determine`'s
+    /// rule 3 covers the narrower case of a snapshot that decoded to no
+    /// events at all.
+    ///
+    /// Read on every render (`EventListView.content`, `seasonNotice`), and
+    /// now cheaper for it: one short-circuiting scan of `snapshot.events`
+    /// instead of a full six-stage `EventFilter.apply` plus its `ViewWindow`
+    /// construction.
     var landingState: LandingState {
-        guard snapshot != nil else { return .inSeason }
-        let upcomingDefaultCount = filteredEvents(FilterSelection()).count
+        guard let snapshot else { return .inSeason }
+        let current = now()
+        let graceStart = current.addingTimeInterval(-3600)
         return LandingState.determine(
-            now: now(),
+            now: current,
             selectedYear: selectedYear,
             availableYears: years,
-            upcomingDefaultCount: upcomingDefaultCount
+            yearHasUpcomingEvents: snapshot.events.contains { $0.start >= graceStart },
+            yearHasEvents: !snapshot.events.isEmpty
         )
     }
 
@@ -1058,26 +1086,41 @@ final class AppModel {
         return combined
     }
 
-    /// The off-season "browse the season that just ended" action: switches
-    /// the filter to `.season`, which shows the whole 9-week season
-    /// regardless of "now" — unlike `.next`, it isn't subject to the
-    /// adaptive window's 90-day cap, so it always has the ended season's
-    /// events to show. Does not touch `selectedYear`; `landingState`'s
-    /// `endedSeasonYear` is already the year being viewed.
+    /// The off-season "Browse the _ season" action, for both landing
+    /// states: moves to `year` if it isn't the one already selected, then
+    /// switches the filter to `.season`, which shows that year's whole
+    /// 9-week season regardless of "now" — unlike `.next`, it isn't subject
+    /// to the adaptive window's 90-day cap, so there is always a season's
+    /// worth of events to show.
     ///
-    /// Only ever reachable from `.postSeason`: `OffSeasonLandingView` hides
-    /// the "Browse the _ season" button entirely in `.preSeason` (see
-    /// `LandingState.archiveYear`), because this method has no way to honor
-    /// a `.preSeason` label of `selectedYear - 1` — applying `.season` scope
-    /// unconditionally would show `selectedYear` (the *upcoming* year), not
-    /// the labeled past year. A year-aware `browsePastSeason(year:)` that
-    /// also calls `select(year:)` is the future path if pre-season archive
-    /// browsing is wanted; not implemented here (follow-up).
-    func browseArchiveSeason() {
-        // No `scopeResetCount` bump needed: only reachable from
-        // `OffSeasonLandingView`, which renders solely under
-        // `filter.isDefault` — so this always changes `dateScope`
-        // (`.next` → `.season`), a `PendingDayScroll.Key` field (#254).
+    /// `year` is always `landingState.archiveYear`, the year on the
+    /// button's own label (`OffSeasonLandingView`), so the label and the
+    /// outcome cannot come apart.
+    ///
+    /// Taking the year as a parameter *replaces* the year-blind method this
+    /// grew out of rather than sitting beside it (#186). In `.postSeason`
+    /// the offered year is `endedSeasonYear`, which is already
+    /// `selectedYear`, so the guard falls through and this is exactly that
+    /// older behaviour, with no extra fetch; in `.preSeason` the offered
+    /// year is an earlier one from the years manifest and has to be
+    /// selected first. One button, one method, both landing states — the
+    /// view needs no case analysis, which is the whole reason for
+    /// replacement over addition.
+    ///
+    /// `select(year:)` never throws — a network failure just leaves
+    /// `snapshot`/`phase` reflecting that (see its doc comment) — so there
+    /// is nothing to catch, and the filter is set unconditionally
+    /// afterward so a failed fetch doesn't strand the transition half-done.
+    func browsePastSeason(year: Int) async {
+        if year != selectedYear {
+            await select(year: year)
+        }
+        // No `scopeResetCount` bump needed: this always changes at least one
+        // `PendingDayScroll.Key` field (#254). Either `year != selectedYear`
+        // and `select(year:)` above changed `Key.year`, or it didn't and this
+        // is reachable only from `OffSeasonLandingView`, which renders solely
+        // under `filter.isDefault` — so `dateScope` changes (`.next` →
+        // `.season`).
         filter = FilterSelection(dateScope: .season)
     }
 
@@ -1099,7 +1142,7 @@ final class AppModel {
         guard case .postSeason(_, let nextSeasonYear?, _, _) = landingState else { return }
         await select(year: nextSeasonYear)
         // No `scopeResetCount` bump needed: same `OffSeasonLandingView`-only
-        // reachability as `browseArchiveSeason()`, and `select(year:)` above
+        // reachability as `browsePastSeason(year:)`, and `select(year:)` above
         // changes `Key.year` on every path this runs (#254).
         filter = FilterSelection(dateScope: .all)
     }
@@ -1205,6 +1248,13 @@ final class AppModel {
     /// the key could see (#254 scope addition). Window *growth*
     /// (`goToDay`/`expandWindowEnd`) never bumps it: a pending deep-link
     /// scroll is literally waiting for that growth, so it must never stale.
+    ///
+    /// `goToDay(crossingYears:)` is not an exception to that, despite the
+    /// name and despite bumping: what bumps is the *reset* it performs on
+    /// the season it is leaving, which lands before any growth and before
+    /// its caller arms a scroll. Nothing that could still be waiting is
+    /// staled by it that the year change had not staled already —
+    /// `PendingDayScroll.Key` carries `year`.
     private(set) var scopeResetCount = 0
 
     /// Replaces the week selection wholesale — the strip owns tap/drag
@@ -1474,6 +1524,86 @@ final class AppModel {
         if let end = plan.expandEnd { next.windowEndDayKey = end }
         filter = next
         return true
+    }
+
+    /// *Take me to that day, in whatever season it belongs to* — `goToDay`'s
+    /// cross-year sibling. Moves `selectedYear` first when `dayKey` names
+    /// another year, then hands off to `goToDay(_:)` unchanged.
+    ///
+    /// Returns whether the target was accepted, on the same contract as
+    /// `goToDay(_:)`, so an existing `guard model.goToDay(key) else { return }`
+    /// call site carries over with nothing added but the `await`. It refuses,
+    /// without moving anything the user can see, when:
+    ///
+    /// - `dayKey` carries no leading `yyyy` we can read. `ChqTime`'s
+    ///   `isCanonicalDayKey` guarantees the shape upstream, but this is a
+    ///   deep-link path and the argument is a plain `String` — the year is
+    ///   parsed, never force-unwrapped.
+    /// - the year is not in the `years` manifest. There is no feed to fetch
+    ///   for a season the server does not publish, so switching to it would
+    ///   only strand the reader on an empty screen in a year they cannot
+    ///   navigate out of by any control.
+    /// - the fetch for that year failed. `select(year:)` never throws — a
+    ///   network failure just leaves `snapshot == nil` / `phase == .offline`
+    ///   (see its doc comment) — so a failed cross-year jump is only visible
+    ///   as a missing snapshot, and that is what is checked. Unlike
+    ///   `browsePastSeason(year:)`/`previewNextSeason()`, which set a filter
+    ///   unconditionally because the user's *intent* to view that season
+    ///   survives a failed fetch, this returns `false`: its caller's next
+    ///   move is to queue a scroll to a specific day, and there is no day to
+    ///   scroll to.
+    ///
+    /// A jump that does cross a year also clears the outgoing season's
+    /// scope-local date state — the window expansion and any browsed day.
+    /// Those describe navigation inside one season and are actively harmful
+    /// in another; see the comment at that line.
+    ///
+    /// The year switch leaves `selectedYear` moved even on the two later
+    /// refusals — `select(year:)` is what fetches, so it has to run before we
+    /// can know the fetch failed. That is the same end state as any other
+    /// failed year switch (`previewNextSeason` reaches it too) and the
+    /// offline phase explains it on screen.
+    ///
+    /// **Deliberately not folded into `goToDay(_:)` itself.** The rail's day
+    /// keys all come from the current year's `navigableBounds`, so only a
+    /// deep link can produce a cross-year key at all. Confining the year
+    /// switch here keeps `goToDay(_:)` synchronous and leaves the rail's hot
+    /// path — every chip tap — free of an `await` it can never need. A later
+    /// reader will want to simplify this inward; that is what it would cost.
+    @discardableResult
+    func goToDay(crossingYears dayKey: String) async -> Bool {
+        guard let year = Int(dayKey.prefix(4)) else { return false }
+        guard year != selectedYear else { return goToDay(dayKey) }
+        guard years.contains(year) else { return false }
+
+        await select(year: year)
+        guard snapshot != nil else { return false }
+
+        // Drop the outgoing season's scope-local date state before planning
+        // in the new one (#234/#156). It is not inert there: `ViewWindow.make`
+        // *clamps* an out-of-range expansion input to the new year's bounds
+        // rather than dropping it, so a 2025 `windowStartDayKey` arrives as
+        // 2026's `bounds.lowerBound` and drags the `.next` window back to the
+        // season opening — #156's "silently re-widened window" with the scope
+        // change swapped for a year change. `selectedDayKey` is the same
+        // problem one layer earlier: a `.day` base window pinned to a day in
+        // the old season, then expanded to reach this target, spans both.
+        //
+        // Two `filter` assignments, so two `didSet` rebuilds — `goToDay` below
+        // has to plan against the cleared window, so they cannot be batched.
+        // This path already awaited a year switch and possibly a network
+        // fetch; one extra derived-counts pass is not what costs it anything.
+        //
+        // The `scopeResetCount` bump `clearScopeLocalDateState` carries is
+        // safe here even though window *growth* must never stale a pending
+        // scroll: it lands before the growth and before the caller arms its
+        // scroll, and the year change alone has already staled every target
+        // armed earlier (`PendingDayScroll.Key` carries `year`).
+        var cleared = filter
+        clearScopeLocalDateState(in: &cleared)
+        filter = cleared
+
+        return goToDay(dayKey)
     }
 
     private func persistFilter() {

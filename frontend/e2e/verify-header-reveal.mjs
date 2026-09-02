@@ -21,7 +21,7 @@
 import { chromium, webkit } from 'playwright';
 import { pinClock } from './fixedNow.mjs';
 import { check, skip, finish } from './results.mjs';
-import { enterList } from './regime.mjs';
+import { enterList, makeRoomBelow } from './regime.mjs';
 
 const URL = process.env.URL ?? 'http://localhost:3000/';
 
@@ -100,10 +100,13 @@ const wheel = async (p, dy) => { await p.mouse.move(195, 600); await p.mouse.whe
  * Wait for the document to stop moving.
  *
  * Not a nicety — without it this suite was flaky 2 runs in 3, and it failed in
- * CI. `window.scrollTo(0, 6000)` lands short (the render window has not
- * mounted that far yet), the list then grows, and the app and the browser
- * spend the best part of a second correcting for it in a long run of small
- * scrolls. A wheel fired into the middle of that is measured NET of the
+ * CI. `window.scrollTo(0, 6000)` lands short (day sections carry
+ * `content-visibility: auto`, so the document's height below the reader is an
+ * estimate until each one comes into view), the list then grows into its real
+ * heights, and the app and the browser spend the best part of a second
+ * correcting for it in a long run of small scrolls. Before #274 phase 4 a
+ * render window that had not mounted that far yet did the same thing, and was
+ * the reason recorded here. A wheel fired into the middle of that is measured NET of the
  * correction: traced at 4,935 → 4,829, so a 120px wheel DOWN moved the reader
  * 106px UP and the header stayed revealed, which the next check then reported
  * as its own failure.
@@ -145,6 +148,14 @@ const settle = async (p, { stableSamples = 4, gapMs = 120, timeoutMs = 8000, lab
  */
 const deepAndHidden = async (p, y = 6000) => {
   await p.evaluate((to) => window.scrollTo(0, to), y);
+  await settle(p);
+  // The wheels below need somewhere to wheel TO. `scrollTo` is undone by
+  // `useDayAnchor`'s hold, so the reader is wherever the load left them — and
+  // once the season's tail runs short that is the bottom of the document, where
+  // a downward wheel moves 0px and the header is right not to hide. Six checks
+  // in this suite reported `scrollY=159747` and a header that would not park on
+  // 2026-08-31; see `makeRoomBelow` in `regime.mjs` for the measurements.
+  await makeRoomBelow(p);
   await settle(p);
   // Wheel until it is actually hidden, rather than assuming one tick does it.
   //
@@ -393,7 +404,10 @@ const deepAndHidden = async (p, y = 6000) => {
   // The seam a unit test cannot reach: `revealed` is a belief, and the sticky
   // header's actual position is a fact. When they disagree the header is on
   // screen and `inert` — unreachable by keyboard, unannounced by a screen
-  // reader — which is precisely the trap `filterCardParked` documents.
+  // reader — which is precisely the trap `Header.tsx`'s `inert={!revealed}`
+  // documents. (Named `filterCardParked` here until #274 phase 3 moved the
+  // filter card into an overlay hanging off that header; the trap is the
+  // same one, one level up.)
   //
   // Reproduced before the fix in three steps a reader can take: search until
   // the list is empty (document 8,401px → 1,049px, `scrollY` clamped
