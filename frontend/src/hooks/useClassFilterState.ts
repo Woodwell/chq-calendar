@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { USER_STATE_EXPIRY_MS } from '@/lib/constants';
+import { getChautauquaSeasonWeeks } from '@/lib/utils/dateHelpers';
+import { chqParts } from '@/lib/utils/chqTime';
 import type { AvailabilityFilter, TimeOfDay } from '@/lib/utils/classFilterHelpers';
 
 /**
@@ -25,20 +27,44 @@ export interface ClassFilterState {
   showFavoritesOnly: boolean;
 }
 
-const EMPTY: ClassFilterState = {
-  searchTerm: '',
-  selectedCategories: [],
-  selectedVenues: [],
-  // Opens on what can actually be joined. Most of the catalog has finished
-  // by late August, and a page that opens on 454 classes nobody can sign up
-  // for buries the sixty that are live.
-  availability: 'open',
-  selectedWeeks: [],
-  selectedDays: [],
-  meetingDays: [],
-  timeOfDay: 'all',
-  showFavoritesOnly: false,
-};
+/**
+ * `'open'` during the season, `'all'` outside it.
+ *
+ * Opening on what can actually be joined is right while the season runs: most
+ * of the catalog has finished by late August, and a page that opens on 454
+ * classes nobody can sign up for buries the sixty that are live.
+ *
+ * It is exactly wrong once the season ends. The ticket site drops a session
+ * from its detail page the moment it has passed, so by September every class
+ * reports none at all — and availability is a question only a session can
+ * answer. Defaulting to `'open'` then hides the entire catalog behind a
+ * filter the reader never set, leaving whichever stragglers the last crawl
+ * caught. Observed on 2026-09-01: 41 of 516 classes, all week 9.
+ *
+ * The season's own calendar decides, not a month boundary, so this needs no
+ * revisiting when the Institution moves its dates.
+ */
+export function defaultAvailability(now: Date = new Date()): AvailabilityFilter {
+  const weeks = getChautauquaSeasonWeeks(chqParts(now).year);
+  if (weeks.length === 0) return 'all';
+  const opens = weeks[0].start;
+  const closes = weeks[weeks.length - 1].end;
+  return now >= opens && now <= closes ? 'open' : 'all';
+}
+
+function emptyState(now?: Date): ClassFilterState {
+  return {
+    searchTerm: '',
+    selectedCategories: [],
+    selectedVenues: [],
+    availability: defaultAvailability(now),
+    selectedWeeks: [],
+    selectedDays: [],
+    meetingDays: [],
+    timeOfDay: 'all',
+    showFavoritesOnly: false,
+  };
+}
 
 interface StoredState extends ClassFilterState {
   lastSaved: number;
@@ -48,22 +74,22 @@ interface StoredState extends ClassFilterState {
 function load(): ClassFilterState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return EMPTY;
+    if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as Partial<StoredState>;
-    if (!parsed.lastSaved || Date.now() - parsed.lastSaved > USER_STATE_EXPIRY_MS) return EMPTY;
+    if (!parsed.lastSaved || Date.now() - parsed.lastSaved > USER_STATE_EXPIRY_MS) return emptyState();
     return {
       searchTerm: typeof parsed.searchTerm === 'string' ? parsed.searchTerm : '',
       selectedCategories: Array.isArray(parsed.selectedCategories) ? parsed.selectedCategories : [],
       selectedVenues: Array.isArray(parsed.selectedVenues) ? parsed.selectedVenues : [],
-      availability: parsed.availability ?? EMPTY.availability,
+      availability: parsed.availability ?? emptyState().availability,
       selectedWeeks: Array.isArray(parsed.selectedWeeks) ? parsed.selectedWeeks : [],
       selectedDays: Array.isArray(parsed.selectedDays) ? parsed.selectedDays : [],
       meetingDays: Array.isArray(parsed.meetingDays) ? parsed.meetingDays : [],
-      timeOfDay: parsed.timeOfDay ?? EMPTY.timeOfDay,
+      timeOfDay: parsed.timeOfDay ?? emptyState().timeOfDay,
       showFavoritesOnly: parsed.showFavoritesOnly ?? false,
     };
   } catch {
-    return EMPTY;
+    return emptyState();
   }
 }
 
@@ -121,7 +147,7 @@ export function useClassFilterState() {
     setFilters((f) => ({ ...f, showFavoritesOnly: !f.showFavoritesOnly }));
   }, []);
 
-  const clearAll = useCallback(() => setFilters(EMPTY), []);
+  const clearAll = useCallback(() => setFilters(emptyState()), []);
 
   return {
     filters,
