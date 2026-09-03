@@ -28,18 +28,30 @@ from a real failure and aborts. So does every run after it.
 
 ## Deploying
 
-Two steps, in this order, because the workflow updates code on a function
-Terraform creates:
+Three steps, in this order.
+
+**Package the backend first.** Every Lambda in `infrastructure/` — this one and
+its five siblings — points `filename` at `../backend/lambda-function.zip` and
+hashes it with `filebase64sha256`. That file is a build output, not a checked-in
+artifact, so in a fresh clone Terraform cannot even *parse* the config until it
+exists: `terraform validate` fails with `no such file or directory` before it
+gets as far as planning anything. `npm run build` alone does not produce it.
 
 ```bash
-cd infrastructure && terraform apply    # creates the function, role, log group
-                                        # and both schedules, DISABLED
+npm run package:terraform --workspace=chautauqua-backend
 ```
 
-Then push to `main`, or re-run the production deploy workflow. Before the first
-apply the deploy step skips cleanly with a notice rather than failing, so the
-order is forgiving in one direction only: code deploys are no-ops until the
-function exists.
+**Then apply**, which creates the function, its scoped role, the log group, and
+both schedules — DISABLED:
+
+```bash
+cd infrastructure && terraform apply
+```
+
+**Then deploy the code.** Push to `main`, or re-run the production deploy
+workflow. Before the first apply the deploy step skips cleanly with a notice
+rather than failing, so the order is forgiving in one direction only: code
+deploys are no-ops until the function exists.
 
 ## One-time runs
 
